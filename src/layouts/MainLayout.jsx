@@ -1,0 +1,4 @@
+import { View, Text } from 'react-native';
+export default function MainLayout() {
+  return (<View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text>MainLayout</Text></View>);
+}
