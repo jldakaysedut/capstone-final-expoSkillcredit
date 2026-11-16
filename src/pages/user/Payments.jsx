@@ -1,3 +1,5 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/Payments.jsx
 //  Mobile version (same data + logic as the web Payments page), compact X-style typography
@@ -5,15 +7,13 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, Pressable, SectionList, ScrollView, TextInput, Modal, Alert, RefreshControl, AppState,
-  ActivityIndicator, KeyboardAvoidingView, Platform, DeviceEventEmitter, StyleSheet,
+  Modal, RefreshControl, AppState, Platform, DeviceEventEmitter, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, SectionList, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
-import {
-  ArrowDownRight, ArrowUpRight, Check, CheckCircle2, Clock, CreditCard, History, RefreshCcw, X, XCircle,
-} from 'lucide-react-native';
+import { ArrowDownRight, ArrowUpRight, Check, CheckCircle2, Clock, CreditCard, History, RefreshCcw, X, XCircle } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 const T = {
@@ -52,7 +52,7 @@ const fmtDate = (iso) => {
 function txLook(tx) {
   if (tx.status === 'pending') return { Icon: Clock, bg: '#fffbeb', fg: '#d97706' };
   if (tx.status === 'failed') return { Icon: XCircle, bg: '#fff1f2', fg: '#e11d48' };
-  if (tx.type === 'EARNED' || tx.type === 'TOPUP') return { Icon: ArrowDownRight, bg: '#ecfdf5', fg: '#059669' };
+  if (tx.type === 'EARNED' || tx.type === 'TOPUP' || tx.type === 'DAILY_REWARD') return { Icon: ArrowDownRight, bg: '#ecfdf5', fg: '#059669' };
   if (tx.type === 'SPENT') return { Icon: ArrowUpRight, bg: '#fff1f2', fg: '#e11d48' };
   return { Icon: RefreshCcw, bg: '#f0f9ff', fg: '#0284c7' }; // REFUND
 }
@@ -87,6 +87,7 @@ export default function Payments() {
   const balanceRef = useRef(0);
   const pollRef = useRef(null);
   const awaitingRef = useRef(false); // true while the user is out in the PayMongo checkout
+  const checkoutTxRef = useRef(null); // the exact checkout transaction, never inferred from wallet balance
 
   // ── load balance + ledger (same data rules as the web)
   const load = async () => {
@@ -105,6 +106,11 @@ export default function Payments() {
       balanceRef.current = bal;
 
       const { data: topups } = await supabase.from('topup_transactions').select('*').eq('user_id', uid);
+      const { data: dailyRewards, error: rewardError } = await supabase.from('daily_reward_claims')
+        .select('claim_date, streak_day, credits_earned')
+        .eq('user_id', uid).order('claim_date', { ascending: false });
+      if (rewardError) console.warn('Daily reward history unavailable:', rewardError);
+
       const { data: sessions } = await supabase
         .from('sessions')
         .select('id, status, credit_amount, created_at, student_id, instructor_id, skill:skills(title)')
@@ -125,6 +131,17 @@ export default function Payments() {
           status: t.status,
           meta: `₱${t.amount_php}`,
         });
+      });
+
+      // Read-only entries: credits were already granted by claim_daily_reward().
+      (dailyRewards || []).forEach((claim) => {
+        combined.push({
+          id: `daily-reward-${claim.claim_date}`, type: 'DAILY_REWARD',
+          title: 'Daily Login Streak Bonus', amount: claim.credits_earned,
+          isPositive: true, date: `${claim.claim_date}T12:00:00+08:00`,
+          status: 'paid', meta: `Day ${claim.streak_day} of 7`,
+        });
+        totalEarned += Number(claim.credits_earned || 0);
       });
 
       (sessions || []).forEach((sess) => {
@@ -218,7 +235,7 @@ export default function Payments() {
     const creditSub = DeviceEventEmitter.addListener('credit_updated', () => load());
     const appSub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
-      if (awaitingRef.current) confirmPayment(); // back from the checkout page
+      if (awaitingRef.current) confirmPayment(checkoutTxRef.current); // back from the checkout page
       else load();
     });
 
@@ -273,17 +290,22 @@ export default function Payments() {
       // We only send the amount, so the app can't fake credits.
       const { data, error } = await supabase.functions.invoke('create-paymongo-checkout', {
         body: { amount: amountPHP, return_path: '/payments' },
+        headers: { 'x-skillcredit-client': 'mobile' },
       });
       if (error) throw error;
       if (!data?.checkout_url) throw new Error(data?.error || 'Invalid response from payment gateway.');
 
+      checkoutTxRef.current = data.transaction_id || null;
+      awaitingRef.current = true;
       setIsProcessing(false);
       setShowTopup(false);
       await new Promise((r) => setTimeout(r, 400)); // let the sheet finish closing before the browser opens
-      const result = await WebBrowser.openBrowserAsync(data.checkout_url);
-      awaitingRef.current = true;
-      if (result.type !== 'opened') confirmPayment(); // iOS resolves when the user closes the page
+      // PayMongo uses an HTTPS return page for mobile too. The user can close the
+      // browser and return to SkillCredit; the webhook (not this screen) awards credits.
+      await WebBrowser.openBrowserAsync(data.checkout_url);
+      if (awaitingRef.current) confirmPayment(checkoutTxRef.current);
     } catch (error) {
+      awaitingRef.current = false;
       console.error('Checkout Error:', error);
       Alert.alert('Something went wrong', 'We could not prepare your checkout. Please try again.');
       setIsProcessing(false);
@@ -294,9 +316,42 @@ export default function Payments() {
   const closeTopup = () => { if (!isProcessing) setShowTopup(false); };
 
   if (loading) {
+    // Display placeholders only; payment calculations, fetching and checkout logic are unchanged.
+    const Bone = ({ width = '100%', height = 14, radius = 7 }) => (
+      <View style={{ width, height, borderRadius: radius, backgroundColor: '#e9eff0' }} />
+    );
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color={T.brand} />
+      <View style={{ flex: 1, backgroundColor: '#fff', paddingTop: insets.top }} accessibilityLabel="Loading payments">
+        <ScrollView scrollEnabled={false} contentContainerStyle={{ paddingBottom: 48 }}>
+          <View style={{ padding: 18, gap: 14, borderBottomWidth: 1, borderBottomColor: T.line }}>
+            <Bone width="38%" height={13} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, gap: 10 }}>
+                <Bone width="60%" height={36} radius={10} />
+                <Bone width="38%" height={12} />
+              </View>
+              <Bone width={115} height={42} radius={22} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 18, marginTop: 12 }}>
+              <View style={{ flex: 1, gap: 9 }}><Bone width="46%" height={12} /><Bone width="70%" height={20} /></View>
+              <View style={{ flex: 1, gap: 9 }}><Bone width="46%" height={12} /><Bone width="70%" height={20} /></View>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 15 }}>
+            {[0, 1, 2, 3].map((i) => <Bone key={i} width={73} height={32} radius={16} />)}
+          </View>
+          <View style={{ paddingHorizontal: 16, paddingBottom: 10, gap: 8 }}>
+            <Bone width="30%" height={21} />
+            <Bone width="42%" height={12} />
+          </View>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: T.line }}>
+              <Bone width={44} height={44} radius={12} />
+              <View style={{ flex: 1, gap: 9 }}><Bone width="68%" height={14} /><Bone width="87%" height={12} /></View>
+              <Bone width={55} height={18} />
+            </View>
+          ))}
+        </ScrollView>
       </View>
     );
   }
@@ -305,11 +360,11 @@ export default function Payments() {
   const counts = {
     All: ledger.length,
     'Top-ups': ledger.filter((t) => t.type === 'TOPUP').length,
-    Earned: ledger.filter((t) => t.type === 'EARNED').length,
+    Earned: ledger.filter((t) => t.type === 'EARNED' || t.type === 'DAILY_REWARD').length,
     Spent: ledger.filter((t) => t.type === 'SPENT').length,
     Refunds: ledger.filter((t) => t.type === 'REFUND').length,
   };
-  const filtered = filter === 'All' ? ledger : ledger.filter((t) => t.type === FILTER_TYPE[filter]);
+  const filtered = filter === 'All' ? ledger : ledger.filter((t) => t.type === FILTER_TYPE[filter] || (filter === 'Earned' && t.type === 'DAILY_REWARD'));
   const sections = GROUP_ORDER
     .map((title) => ({ title, data: filtered.filter((t) => getGroup(t.date) === title) }))
     .filter((sec) => sec.data.length > 0);
@@ -323,7 +378,7 @@ export default function Payments() {
   const Header = (
     <View>
       {/* balance */}
-      <View style={s.topBlock}>
+      <Reveal delay={90}><View style={s.topBlock}>
         {!!notice && (
           <View style={[s.notice, { backgroundColor: noticeStyle[notice.tone].bg }]}>
             {notice.tone === 'info'
@@ -345,10 +400,10 @@ export default function Payments() {
             </View>
             <Text style={s.detail}>≈ ₱{(balance * 10).toLocaleString()}</Text>
           </View>
-          <Pressable onPress={openTopup} style={s.addBtn}>
+          <PressScale onPress={openTopup} style={s.addBtn}>
             <CreditCard size={17} color="#fff" />
             <Text style={s.addBtnText}>Add credits</Text>
-          </Pressable>
+          </PressScale>
         </View>
 
         <View style={s.statsRow}>
@@ -362,7 +417,7 @@ export default function Payments() {
             <Text style={s.statValue}>−{stats.spent.toLocaleString()} CR</Text>
           </View>
         </View>
-      </View>
+      </View></Reveal>
 
       {/* filter chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
@@ -477,7 +532,7 @@ export default function Payments() {
                 </View>
               </View>
 
-              <Pressable
+              <PressScale
                 onPress={handleCheckout}
                 disabled={isProcessing || !amountValid}
                 style={[s.payBtn, (isProcessing || !amountValid) && { opacity: 0.5 }]}
@@ -485,7 +540,7 @@ export default function Payments() {
                 {isProcessing
                   ? <ActivityIndicator color="#fff" />
                   : <Text style={s.payBtnText}>Pay ₱{amountPHP.toLocaleString()}</Text>}
-              </Pressable>
+              </PressScale>
               <Text style={[s.detail, { textAlign: 'center', marginTop: 10 }]}>Secure checkout by PayMongo</Text>
             </ScrollView>
           </View>
@@ -497,22 +552,22 @@ export default function Payments() {
 
 const s = StyleSheet.create({
   // balance block
-  topBlock: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14 },
+  topBlock: { paddingHorizontal: 16, backgroundColor: '#F3FAF6', paddingTop: 20, paddingBottom: 21, borderBottomWidth: 1, borderBottomColor: '#DCEDE3'},
   label: { fontSize: 13, color: T.sub },
-  balance: { fontSize: 32, fontWeight: '700', color: T.text, letterSpacing: -0.6 },
-  balanceUnit: { fontSize: 17, fontWeight: '600', color: T.sub },
+  balance: { fontSize: 38, fontWeight: '800', color: '#074D39', letterSpacing: -1.2},
+  balanceUnit: { fontSize: 17, color: '#357F69', fontWeight: '700'},
   detail: { fontSize: 13, color: T.sub },
-  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 42, paddingHorizontal: 18, borderRadius: 21, backgroundColor: T.brand },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 18, backgroundColor: T.brand , borderRadius: 16, height: 46, shadowColor: '#047857', shadowOpacity: 0.16, shadowRadius: 9, shadowOffset:{width:0,height:4}, elevation: 2},
   addBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: T.line },
   statDivider: { width: 1, height: 30, backgroundColor: T.line },
-  statValue: { fontSize: 15, fontWeight: '700', color: T.text, marginTop: 1 },
-  notice: { flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  statValue: { fontSize: 15, marginTop: 1 , fontWeight: '800', color: '#07583E'},
+  notice: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 , borderRadius: 16},
   noticeText: { flex: 1, fontSize: 13, fontWeight: '600', lineHeight: 18 },
 
   // chips
   chipRow: { gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
-  chip: { justifyContent: 'center', paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: T.field },
+  chip: { justifyContent: 'center', paddingHorizontal: 14, height: 34, backgroundColor: '#ECF6F0', borderRadius: 15},
   chipOn: { backgroundColor: T.text },
   chipText: { fontSize: 13, fontWeight: '600', color: T.text },
 
@@ -520,7 +575,7 @@ const s = StyleSheet.create({
   listHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: T.line },
   title: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
   groupLabel: { fontSize: 13, fontWeight: '600', color: T.sub, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, backgroundColor: '#fff' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderBottomWidth: 1, backgroundColor: '#fff' , borderBottomColor: '#E7F0E9', paddingVertical: 15},
   txIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   rowTitle: { fontSize: 15, fontWeight: '600', color: T.text, lineHeight: 20, marginBottom: 1 },
   amount: { fontSize: 15, fontWeight: '700' },
@@ -535,10 +590,10 @@ const s = StyleSheet.create({
 
   // sheet
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 8, maxHeight: '90%' },
+  sheet: { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 8, maxHeight: '90%' , borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginBottom: 6 },
   sheetTitle: { fontSize: 18, fontWeight: '700', color: T.text, marginTop: 6, marginBottom: 2 },
-  pkgRow: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingVertical: 8, borderTopWidth: 1, borderTopColor: T.line },
+  pkgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: T.line , minHeight: 64},
   pkgPrice: { fontSize: 15, fontWeight: '600', color: T.text, marginBottom: 1 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: T.sub, marginBottom: 8 },
   amountField: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 42, borderRadius: 21, backgroundColor: T.field, borderWidth: 1, borderColor: 'transparent', paddingHorizontal: 14 },

@@ -110,7 +110,11 @@ export default function UserReports() {
       if (Date.now() - lastFetch.current > 3000) fetchReports(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchReports(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchReports(true);
+    const liveChannel = supabase.channel('mod_userreports_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchReports(true); setRefreshing(false); };

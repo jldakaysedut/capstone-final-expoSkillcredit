@@ -1,18 +1,23 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 import { useState, useEffect } from 'react';
 import {
-  View, Text, Pressable, ScrollView, TextInput, Modal, Alert, Keyboard, ActivityIndicator,
-  KeyboardAvoidingView, Platform, StyleSheet,
+  Modal, Keyboard, Platform, StyleSheet, Switch
 } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { User, ChevronRight, Eye, EyeOff, AlertTriangle, Trash2, CheckCircle2 } from 'lucide-react-native';
+import { User, ChevronRight, Eye, EyeOff, AlertTriangle, Trash2, CheckCircle2, Moon, Sun } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
+import { useUserTheme } from '../../components/premium/PremiumTheme';
 
 const CONFIRM_WORD = 'deleteacc';
 
 export default function Settings() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { isDark, toggleDark } = useUserTheme();
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -101,7 +106,7 @@ export default function Settings() {
     }
   };
 
-  if (loading) return <View style={s.center}><ActivityIndicator size="large" color="#047857" /></View>;
+  if (loading) return <UserScreenSkeleton type="settings" />;
 
   const canSubmitPw = !!newPassword && !isUpdatingPassword;
 
@@ -120,7 +125,7 @@ export default function Settings() {
         </Pressable>
 
         {/* password */}
-        <View style={s.group}>
+        <Reveal delay={90}><View style={s.group}>
           <Text style={s.groupTitle}>Change password</Text>
 
           <Text style={s.label}>New password</Text>
@@ -143,13 +148,29 @@ export default function Settings() {
             </View>
           )}
 
-          <Pressable onPress={handlePasswordUpdate} disabled={!canSubmitPw} style={[s.btnSolid, !canSubmitPw && { opacity: 0.45 }]}>
+          <PressScale onPress={handlePasswordUpdate} disabled={!canSubmitPw} style={[s.btnSolid, !canSubmitPw && { opacity: 0.45 }]}>
             {isUpdatingPassword ? <ActivityIndicator color="#fff" /> : <Text style={s.btnSolidTxt}>Update password</Text>}
-          </Pressable>
-        </View>
+          </PressScale>
+        </View></Reveal>
+
+        {/* Local, regular-user-only appearance. Doesn't touch account/database settings. */}
+        <Reveal delay={90}><View style={s.group}>
+          <Text style={s.groupTitle}>Appearance</Text>
+          <View style={s.themeRow}>
+            <View style={s.themeIcon}>
+              {isDark ? <Moon size={20} color="#34d399" /> : <Sun size={20} color="#047857" />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.rowTitle}>Dark Mode</Text>
+              <Text style={s.rowSub}>Use a darker look across regular user screens</Text>
+            </View>
+            <Switch value={isDark} onValueChange={toggleDark} trackColor={{ false: '#cbd5e1', true: '#047857' }}
+              thumbColor="#fff" accessibilityLabel="Dark Mode" />
+          </View>
+        </View></Reveal>
 
         {/* danger */}
-        <View style={s.group}>
+        <Reveal delay={90}><View style={s.group}>
           <Text style={[s.groupTitle, { color: '#be123c' }]}>Delete account</Text>
           <Text style={s.dangerBody}>
             Your profile, skills, and community posts will be hidden from the platform. Past sessions and transactions are kept for audit and security.
@@ -165,7 +186,7 @@ export default function Settings() {
           <Pressable onPress={handleInitiateDelete} disabled={isValidating} style={[s.btnDanger, isValidating && { opacity: 0.5 }]}>
             {isValidating ? <ActivityIndicator color="#e11d48" /> : <><Trash2 size={18} color="#e11d48" /><Text style={s.btnDangerTxt}>Delete my account</Text></>}
           </Pressable>
-        </View>
+        </View></Reveal>
       </ScrollView>
 
       {/* confirm sheet */}
@@ -196,19 +217,21 @@ export default function Settings() {
 }
 
 const s = StyleSheet.create({
+  themeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingBottom: 22 },
+  themeIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ecfdf5' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   pressed: { backgroundColor: '#f3f4f6' },
 
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 16 },
-  iconBubble: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center' },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 13, marginTop: 13, paddingVertical: 18, paddingHorizontal: 15, backgroundColor: '#F4FBF7', borderRadius: 20, borderWidth: 1, borderColor: '#DFEDE4'},
+  iconBubble: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' , borderRadius: 16, backgroundColor: '#D6F3E3'},
   rowTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
   rowSub: { fontSize: 13, color: '#6b7280', marginTop: 2 },
 
-  group: { paddingHorizontal: 16, paddingTop: 22, paddingBottom: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb' },
-  groupTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 14 },
+  group: { marginHorizontal: 13, marginTop: 14, paddingHorizontal: 18, paddingTop: 19, paddingBottom: 7, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E3EEE7', borderTopWidth: 1, borderTopColor: '#E3EEE7', borderRadius: 20},
+  groupTitle: { fontWeight: '800', marginBottom: 14 , fontSize: 19, letterSpacing: -0.4, color: '#123B2C'},
   label: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginBottom: 6 },
-  input: { backgroundColor: '#f0f2f5', borderRadius: 14, paddingHorizontal: 14, height: 48, fontSize: 16, color: '#111827' },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f0f2f5', borderRadius: 14, paddingHorizontal: 14, height: 48 },
+  input: { paddingHorizontal: 14, height: 48, fontSize: 16, color: '#111827' , backgroundColor: '#F6FAF7', borderRadius: 15, borderWidth: 1, borderColor: '#E0EEE6'},
+  inputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, height: 48 , backgroundColor: '#F6FAF7', borderRadius: 15, borderWidth: 1, borderColor: '#E0EEE6'},
   inputFlex: { flex: 1, fontSize: 16, color: '#111827', height: 48 },
 
   msg: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, padding: 12, borderRadius: 12 },
@@ -216,7 +239,7 @@ const s = StyleSheet.create({
   msgOk: { backgroundColor: '#ecfdf5' },
   msgTxt: { flex: 1, fontSize: 14, fontWeight: '600' },
 
-  btnSolid: { marginTop: 18, marginBottom: 20, height: 50, borderRadius: 25, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center' },
+  btnSolid: { marginTop: 18, marginBottom: 20, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center' , borderRadius: 16, height: 52, shadowColor:'#047857', shadowOpacity:0.11, shadowRadius:7, shadowOffset:{width:0,height:3}, elevation:2},
   btnSolidTxt: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
   dangerBody: { fontSize: 14, lineHeight: 21, color: '#6b7280' },
@@ -226,7 +249,7 @@ const s = StyleSheet.create({
   btnDangerTxt: { fontSize: 16, fontWeight: '700', color: '#e11d48' },
 
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 10 },
+  sheet: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 10 , borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grab: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#d1d5db', marginBottom: 14 },
   sheetTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
   sheetBody: { fontSize: 15, color: '#6b7280', marginTop: 4 },

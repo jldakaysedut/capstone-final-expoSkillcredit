@@ -1,3 +1,6 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { useUserTheme } from '../../components/premium/PremiumTheme';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/Messages.jsx
 //  Same data + logic as the web V12 (live updates, quick-action banner, message
@@ -6,18 +9,17 @@
 // ═══════════════════════════════════════════════════════════════
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Alert, Linking, AppState, Animated,
-  BackHandler, ActivityIndicator, KeyboardAvoidingView, Platform, DeviceEventEmitter, StyleSheet,
+  Modal, Linking, AppState, Animated, BackHandler, Platform, DeviceEventEmitter, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import {
-  ArrowLeft, BellOff, CalendarDays, FileText, Heart, ImagePlus, Lock,
-  MessageSquare, MoreVertical, Search, Send, Shield, Star, X,
-} from 'lucide-react-native';
+import { ArrowLeft, BellOff, CalendarDays, FileText, Heart, ImagePlus, Lock, MessageSquare, MoreVertical, Search, Send, Shield, Star, X, Sparkles, ChevronRight } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
+import SkiroMascot from '../../components/SkiroMascot';
 
 // compact X-style tokens (same as UserDashboard)
 const T = {
@@ -89,6 +91,11 @@ const base64ToArrayBuffer = (b64) => {
 };
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const isClosedStatus = (st) => ['completed', 'resolved', 'cancelled'].includes(st);
+const isExpiredSchedule = (dateStr, timeStr) => {
+  if (!dateStr || !timeStr) return false;
+  const timestamp = Date.parse(`${dateStr}T${String(timeStr).slice(0, 5)}:00+08:00`);
+  return Number.isFinite(timestamp) && Date.now() > timestamp;
+};
 const timeOf = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const TABS = ['All', 'Upcoming', 'Active', 'Teachers', 'Students', 'Support', 'Closed'];
@@ -174,6 +181,7 @@ function TypingDots() {
 }
 
 export default function Messages() {
+  const { isDark } = useUserTheme();
   const navigation = useNavigation();
   const route = useRoute();
   const insets = useSafeAreaInsets();
@@ -221,9 +229,17 @@ export default function Messages() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: !selectedContact,
-      tabBarStyle: selectedContact ? { display: 'none' } : undefined,
+      // Return to the same themed tab bar as UserLayout when leaving a chat.
+      // `undefined` previously overrode that style with React Navigation's
+      // default white tab bar, especially visible on the Messages list.
+      tabBarStyle: selectedContact ? { display: 'none' } : {
+        backgroundColor: isDark ? '#162329' : '#fff',
+        borderTopColor: isDark ? '#2b4249' : T.line,
+        borderTopWidth: 1,
+        elevation: 0,
+      },
     });
-  }, [selectedContact, navigation]);
+  }, [selectedContact, navigation, isDark]);
 
   // hide the floating Support button while chatting
   useEffect(() => {
@@ -243,7 +259,7 @@ export default function Messages() {
   // ─── contacts (sessions + support tickets)
   const fetchContacts = async (userId) => {
     const { data: sessionData, error: sessionError } = await supabase.from('sessions')
-      .select(`id, status, created_at, skill:skills(title,category), student_id, instructor_id, instructor_completed, student_completed,
+      .select(`id, status, created_at, scheduled_date, scheduled_time, skill:skills(title,category), student_id, instructor_id, instructor_completed, student_completed,
         student:user_profiles!student_id(id,full_name,avatar_url),
         instructor:user_profiles!instructor_id(id,full_name,avatar_url)`)
       .or(`student_id.eq.${userId},instructor_id.eq.${userId}`)
@@ -269,6 +285,8 @@ export default function Messages() {
         role: isInstructor ? 'Student' : 'Teacher',
         skillCategory: session.skill?.category || 'Uncategorized',
         sessionStatus: session.status,
+        scheduledDate: session.scheduled_date,
+        scheduledTime: session.scheduled_time,
         sortDate: session.created_at || new Date().toISOString(),
         instructorCompleted: session.instructor_completed,
         studentCompleted: session.student_completed,
@@ -673,11 +691,23 @@ export default function Messages() {
   // ─── quick session actions (banner)
   const quickUpdateStatus = async (newStatus) => {
     if (!selectedContact || selectedContact.type !== 'session') return;
-    const { data: session } = await supabase.from('sessions')
+    const { data: session, error: sessionError } = await supabase.from('sessions')
       .select(`*, instructor:user_profiles!instructor_id(id,full_name), student:user_profiles!student_id(id,full_name)`)
       .eq('id', selectedContact.id).single();
+    if (sessionError || !session) {
+      Alert.alert('Cannot verify the current session. Refresh and try again.');
+      return;
+    }
+    if (newStatus === 'upcoming' &&
+        (!['pending', 'reschedule_proposed'].includes(session.status) ||
+          isExpiredSchedule(session.scheduled_date, session.scheduled_time))) {
+      Alert.alert('Schedule expired or changed. Open Manage to review refund options.');
+      await fetchContacts(currentUserId);
+      return;
+    }
 
-    const { error } = await supabase.from('sessions').update({ status: newStatus }).eq('id', selectedContact.id);
+    const { error } = await supabase.from('sessions').update({ status: newStatus })
+      .eq('id', selectedContact.id).eq('status', session.status);
     if (!error) {
       if (newStatus === 'upcoming' && session) {
         const isInstructorAction = session.instructor_id === currentUserId;
@@ -709,16 +739,19 @@ export default function Messages() {
       return;
     }
 
-    if (await confirmAsync('Mark as done', 'Mark session as done?')) {
-      const payload = isInstructor ? { instructor_completed: true } : { student_completed: true };
+    try {
+      if (!(await confirmAsync('Mark as done', 'Mark session as done?'))) return;
+      const { data: outcome, error: completionError } = await supabase.rpc('confirm_session_completion', {
+        p_session_id: session.id,
+      });
+      if (completionError) throw completionError;
+      if (!outcome || !['waiting', 'completed'].includes(outcome.state)) {
+        throw new Error('Unexpected completion response. Refresh the session before retrying.');
+      }
 
-      if (otherCompletedLocal) {
-        payload.status = 'completed';
-        const { data: idata } = await supabase.from('user_profiles').select('credits_balance').eq('id', session.instructor_id).single();
-        await supabase.from('user_profiles').update({ credits_balance: Number(idata?.credits_balance || 0) + Number(session.credit_amount || 0) }).eq('id', session.instructor_id);
+      if (outcome.state === 'completed' && outcome.awarded === true) {
         DeviceEventEmitter.emit('credit_updated');
-
-        await supabase.from('notifications').insert([
+        const { error: noticeError } = await supabase.from('notifications').insert([
           {
             user_id: session.student_id, type: 'session_completed',
             content: `Your session with ${session.instructor?.full_name || 'the teacher'} is officially completed!`,
@@ -730,20 +763,37 @@ export default function Messages() {
             link_url: `/sessions?session=${session.id}`,
           },
         ]);
-      } else {
+        if (noticeError) console.error('Completion notification failed (credits already awarded):', noticeError);
+      } else if (outcome.state === 'waiting' && outcome.new_confirmation === true) {
         const targetUserId = isInstructor ? session.student_id : session.instructor_id;
         const actorName = isInstructor ? session.instructor?.full_name || 'The teacher' : session.student?.full_name || 'The learner';
-        await supabase.from('notifications').insert([{
+        const { error: noticeError } = await supabase.from('notifications').insert([{
           user_id: targetUserId, type: 'session_update',
           content: `${actorName} has marked the session as done. Please confirm to finalize the completion.`,
           link_url: `/sessions?session=${session.id}`,
         }]);
+        if (noticeError) console.error('Session confirmation notification failed:', noticeError);
+        Alert.alert('Marked as done! Waiting for partner confirmation.');
       }
-
-      await supabase.from('sessions').update(payload).eq('id', session.id);
-      if (!otherCompletedLocal) Alert.alert('Marked as done! Waiting for partner confirmation.');
+      const { data: updated, error: refreshError } = await supabase.from('sessions')
+        .select('status,student_completed,instructor_completed')
+        .eq('id', session.id).maybeSingle();
+      if (refreshError) console.error('Could not refresh session flags:', refreshError);
+      if (updated) {
+        const synced = {
+          sessionStatus: updated.status,
+          studentCompleted: updated.student_completed,
+          instructorCompleted: updated.instructor_completed,
+        };
+        setSelectedContact(previous => previous?.id === session.id ? { ...previous, ...synced } : previous);
+        setContacts(previous => previous.map(contact => contact.id === session.id ? { ...contact, ...synced } : contact));
+      }
+    } catch (err) {
+      console.error('Chat quick completion failed:', err);
+      Alert.alert('Error', err?.message || 'Could not mark this session as done.');
+    } finally {
+      setIsProcessingDone(false);
     }
-    setIsProcessingDone(false);
   };
 
   // ─── ⋯ menu (replaces the web's right info panel)
@@ -768,19 +818,13 @@ export default function Messages() {
     })
     .sort((a, b) => new Date(liveMeta[b.id]?.at || b.sortDate) - new Date(liveMeta[a.id]?.at || a.sortDate));
 
-  if (loadingContacts) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color={T.brand} />
-      </View>
-    );
-  }
+  if (loadingContacts) return <UserScreenSkeleton type="chat" />;
 
   // ═══════════════ LIST VIEW (the UserLayout top bar sits above it, so no extra top padding)
   if (!selectedContact) {
     return (
       <View style={{ flex: 1, backgroundColor: '#fff' }}>
-        <View style={s.listTop}>
+        <Reveal delay={90}><View style={s.listTop}>
           <View style={s.searchBox}>
             <Search size={18} color={T.sub} />
             <TextInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Search chats"
@@ -794,9 +838,21 @@ export default function Messages() {
               </Pressable>
             ))}
           </ScrollView>
-        </View>
+        </View></Reveal>
 
         <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
+          {/* Skiro AI has its own secure Edge Function and saved conversation history. */}
+          <Pressable onPress={() => navigation.navigate('SkiroAI')}
+            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#f0fdf4' }}>
+            <View style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }}>
+              <SkiroMascot size={46} mood="idle" />
+            </View>
+            <View style={{ flex: 1, paddingHorizontal: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: T.text }}>Skiro AI</Text>
+              <Text style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>Ask about skills, sessions, your wallet and more</Text>
+            </View>
+            <ChevronRight size={20} color={T.brand} />
+          </Pressable>
           {filteredContacts.length === 0 ? (
             <View style={s.empty}>
               <MessageSquare size={40} color={T.border} />
@@ -837,6 +893,7 @@ export default function Messages() {
   const myCompleted = selectedContact.isInstructor ? selectedContact.instructorCompleted : selectedContact.studentCompleted;
   const otherCompleted = selectedContact.isInstructor ? selectedContact.studentCompleted : selectedContact.instructorCompleted;
   const st = selectedContact.sessionStatus;
+  const scheduleExpired = isExpiredSchedule(selectedContact.scheduledDate, selectedContact.scheduledTime);
   const showBanner = selectedContact.type === 'session'
     && (['pending', 'reschedule_proposed'].includes(st) || (st === 'active' && (myCompleted || otherCompleted)));
   const bannerActive = st === 'active';
@@ -870,21 +927,22 @@ export default function Messages() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <CalendarDays size={16} color={bannerActive ? '#0369a1' : '#4338ca'} />
             <Text style={{ flex: 1, fontSize: 13, lineHeight: 18, color: bannerActive ? '#075985' : '#3730a3', fontWeight: '500' }}>
-              {st === 'pending' && selectedContact.role === 'Teacher' && "⏳ Waiting for the teacher's confirmation."}
-              {st === 'pending' && selectedContact.role === 'Student' && '📅 Booking request. Confirm the schedule?'}
-              {st === 'reschedule_proposed' && selectedContact.role === 'Teacher' && '📅 The teacher proposed a new time.'}
-              {st === 'reschedule_proposed' && selectedContact.role === 'Student' && "⏳ Waiting for the learner's confirmation on the new time."}
+              {['pending', 'reschedule_proposed'].includes(st) && scheduleExpired && '⏰ Schedule expired. Open Manage for refund options.'}
+              {!scheduleExpired && st === 'pending' && selectedContact.role === 'Teacher' && "⏳ Waiting for the teacher's confirmation."}
+              {!scheduleExpired && st === 'pending' && selectedContact.role === 'Student' && '📅 Booking request. Confirm the schedule?'}
+              {!scheduleExpired && st === 'reschedule_proposed' && selectedContact.role === 'Teacher' && '📅 The teacher proposed a new time.'}
+              {!scheduleExpired && st === 'reschedule_proposed' && selectedContact.role === 'Student' && "⏳ Waiting for the learner's confirmation on the new time."}
               {st === 'active' && otherCompleted && !myCompleted && `✨ ${selectedContact.name} marked this as done. Confirm to finish.`}
               {st === 'active' && myCompleted && `⏳ Waiting for ${selectedContact.name} to confirm.`}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-            {st === 'pending' && selectedContact.role === 'Student' && (
+            {st === 'pending' && !scheduleExpired && selectedContact.role === 'Student' && (
               <Pressable onPress={() => quickUpdateStatus('upcoming')} style={[s.bannerBtn, { backgroundColor: '#4338ca' }]}>
                 <Text style={s.bannerBtnText}>Confirm schedule</Text>
               </Pressable>
             )}
-            {st === 'reschedule_proposed' && selectedContact.role === 'Teacher' && (
+            {st === 'reschedule_proposed' && !scheduleExpired && selectedContact.role === 'Teacher' && (
               <Pressable onPress={() => quickUpdateStatus('upcoming')} style={[s.bannerBtn, { backgroundColor: '#4338ca' }]}>
                 <Text style={s.bannerBtnText}>Accept schedule</Text>
               </Pressable>
@@ -911,7 +969,7 @@ export default function Messages() {
         onContentSizeChange={() => { if (!focusMessageId) scrollRef.current?.scrollToEnd({ animated: true }); }}
       >
         {loadingMessages ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={T.brand} />
+          <UserScreenSkeleton type="thread" embedded />
         ) : messages.length === 0 ? (
           <View style={{ margin: 'auto', alignItems: 'center', paddingVertical: 60 }}>
             <Avatar contact={selectedContact} size={64} />
@@ -1093,9 +1151,9 @@ export default function Messages() {
               style={s.input}
             />
             {newMessage.trim() || selectedFile ? (
-              <Pressable onPress={handleSend} disabled={uploadingFile} style={[s.sendBtn, uploadingFile && { opacity: 0.5 }]}>
+              <PressScale onPress={handleSend} disabled={uploadingFile} style={[s.sendBtn, uploadingFile && { opacity: 0.5 }]}>
                 {uploadingFile ? <ActivityIndicator color="#fff" size="small" /> : <Send size={18} color="#fff" />}
-              </Pressable>
+              </PressScale>
             ) : (
               <Pressable onPress={handleQuickLike} style={s.iconBtn} hitSlop={4}>
                 <Heart size={24} color={T.brand} fill="#10b981" />
@@ -1120,13 +1178,13 @@ export default function Messages() {
 
 const s = StyleSheet.create({
   // list
-  listTop: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: T.line },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: T.field, borderRadius: 21, paddingHorizontal: 16, height: 42 },
-  chip: { justifyContent: 'center', paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: T.field },
+  listTop: { paddingHorizontal: 16, borderBottomWidth: 1, backgroundColor: '#F6FBF8', paddingTop: 16, paddingBottom: 15, borderBottomColor: '#DFEDE5'},
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DAEAE0', borderRadius: 17, height: 47},
+  chip: { justifyContent: 'center', paddingHorizontal: 14, height: 34, borderRadius: 15, backgroundColor: '#E9F4ED'},
   chipOn: { backgroundColor: T.text },
   chipText: { fontSize: 13, fontWeight: '600', color: T.text },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
-  rowName: { fontSize: 15, fontWeight: '700', color: T.text, flexShrink: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E7F0EB', paddingVertical: 15, backgroundColor: '#FFFFFF'},
+  rowName: { fontSize: 15, color: T.text, flexShrink: 1 , fontWeight: '800', letterSpacing: -0.2},
   rowSub: { fontSize: 13, color: T.sub, marginTop: 2 },
   onlineDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#10b981', borderWidth: 2, borderColor: '#fff' },
   unreadDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: T.brand },
@@ -1135,19 +1193,19 @@ const s = StyleSheet.create({
   emptySub: { fontSize: 14, color: T.sub, marginTop: 4, textAlign: 'center' },
 
   // chat header + banner
-  chatHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
+  chatHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, borderBottomWidth: 1, backgroundColor: '#F7FBF9', borderBottomColor: '#DCECE3', paddingBottom: 13},
   chatName: { fontSize: 15, fontWeight: '700', color: T.text, flexShrink: 1 },
   chatStatus: { fontSize: 13, color: T.sub },
-  banner: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.line },
+  banner: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, backgroundColor: '#F3FAF5', borderBottomColor: '#DCEFE3'},
   bannerBtn: { paddingHorizontal: 14, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   bannerBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
 
   // messages
   msgWrap: { width: '100%', marginBottom: 4, borderRadius: 16 },
   msgHighlight: { backgroundColor: T.soft },
-  bubble: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18 },
+  bubble: { borderRadius: 19, paddingVertical: 11, paddingHorizontal: 15},
   bubbleMe: { backgroundColor: T.brand, borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: T.field, borderBottomLeftRadius: 4 },
+  bubbleOther: { borderBottomLeftRadius: 4 , backgroundColor: '#EFF6F2'},
   bubbleDeleted: { backgroundColor: '#f7f9f9' },
   time: { fontSize: 12, color: T.sub, marginHorizontal: 6, marginBottom: 6 },
   quote: { borderLeftWidth: 3, borderLeftColor: T.brand, backgroundColor: T.field, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, maxWidth: '100%' },
@@ -1157,7 +1215,7 @@ const s = StyleSheet.create({
   typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: T.sub },
 
   // booking request card
-  bookCard: { width: 250, borderRadius: 12, overflow: 'hidden', borderWidth: 1 },
+  bookCard: { width: 250, overflow: 'hidden', borderWidth: 1 , borderRadius: 19, borderColor: '#D9ECE2'},
   bookCardMe: { backgroundColor: '#fffbeb', borderColor: '#fde68a' },
   bookCardOther: { backgroundColor: '#fff', borderColor: T.line },
   bookHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 30 },
@@ -1169,7 +1227,7 @@ const s = StyleSheet.create({
   inputWrap: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: T.line, backgroundColor: '#fff' },
   input: { flex: 1, minHeight: 42, maxHeight: 120, backgroundColor: T.field, borderRadius: 21, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, fontSize: 15, color: T.text },
   iconBtn: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
+  sendBtn: { backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', marginBottom: 1 , borderRadius: 16, height: 43, width: 43},
   replyBar: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: T.soft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 8 },
   fileChip: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f7f9f9', borderWidth: 1, borderColor: T.line, borderRadius: 12, padding: 8, marginBottom: 8 },
   fileIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: T.soft, alignItems: 'center', justifyContent: 'center' },

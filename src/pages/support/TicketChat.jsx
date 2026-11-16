@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/support/TicketChat.jsx
 //  Mobile version of the web TicketChat. Same data + rules:
@@ -18,7 +19,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Alert, Linking, AppState, DeviceEventEmitter,
+  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Linking, AppState, DeviceEventEmitter,
   ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';

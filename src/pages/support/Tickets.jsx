@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/support/Tickets.jsx
 //  Mobile version of the web Ticket queue. Same data + rules:
@@ -14,7 +15,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, Image, Pressable, FlatList, ScrollView, TextInput, RefreshControl, Alert, Share, AppState, StyleSheet,
+  View, Text, Image, Pressable, FlatList, ScrollView, TextInput, RefreshControl, Share, AppState, StyleSheet,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AlertTriangle, ArrowDownToLine, ArrowRight, Search, Ticket as TicketIcon, X } from 'lucide-react-native';

@@ -62,30 +62,39 @@ export default function Register() {
     setLoading(true);
 
     try {
-      // 1. Create user in Supabase Auth
+      // Supabase Auth is the authority for unique email addresses.
+      // Do not query auth.users / user_profiles publicly to test an address.
+      const normalizedEmail = email.trim().toLowerCase();
+      const duplicateError = 'An account with this email already exists. Please log in instead.';
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
       });
-
-      if (authError) throw authError;
-
-      // 2. Save profile and give 20 credits in user_profiles table
-      if (authData?.user) {
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .insert([
-            {
-              id: authData.user.id,
-              full_name: fullName.trim(),
-              email: email.trim(),
-              credits_balance: 20,
-              has_set_interests: false,
-            },
-          ]);
-
-        if (profileError) throw profileError;
+      if (authError) {
+        if (/already registered|already exists|user already registered|email.*(in use|registered)/i.test(authError.message || '')) {
+          setErrorMsg(duplicateError);
+          return;
+        }
+        throw authError;
       }
+      if (authData?.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+        setErrorMsg(duplicateError);
+        return;
+      }
+      if (!authData?.user) throw new Error('Registration was not completed. Please try again.');
+      if (!authData.session) {
+        setErrorMsg('Please check your email to confirm your account before logging in.');
+        return;
+      }
+      // Only authenticated new registrations receive their one-time 20 CR profile.
+      const { error: profileError } = await supabase.from('user_profiles').insert([{
+        id: authData.user.id,
+        full_name: fullName.trim(),
+        email: normalizedEmail,
+        credits_balance: 20,
+        has_set_interests: false,
+      }]);
+      if (profileError) throw profileError;
 
       // 3. Redirect to SetupInterests instead of Dashboard for first-timers
       navigation.reset({ index: 0, routes: [{ name: 'SetupInterests' }] });

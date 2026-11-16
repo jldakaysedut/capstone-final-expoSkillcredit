@@ -99,7 +99,12 @@ export default function Disputes() {
       if (Date.now() - lastFetch.current > 3000) fetchDisputes(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchDisputes(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchDisputes(true);
+    const liveChannel = supabase.channel('mod_disputes_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, refreshRealtime)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sessions' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchDisputes(true); setRefreshing(false); };

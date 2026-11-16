@@ -1,22 +1,27 @@
 {
   "expo": {
-    "name": "skillcredit-mobile",
+    "name": "SkillCredit",
     "slug": "skillcredit-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
+    "scheme": "skillcredit",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jldakay.skillcredit",
+      "buildNumber": "1",
+      "icon": "./assets/logo.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.anonymous.skillcreditmobile",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "package": "com.anonymous.skillcreditmobile"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/logo.png"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -25,6 +30,10 @@
       "expo-web-browser",
       "@react-native-community/datetimepicker"
     ],
-    "scheme": "skillcredit"
+    "extra": {
+      "eas": {
+        "projectId": "5f14bb1b-96ca-42b6-bec5-d5e704893306"
+      }
+    }
   }
 }

@@ -1,7 +1,8 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/DisputeDetails.jsx
 //  Same queries, same conflict-of-interest guard, same claim step and the SAME escrow
-//  ruling as the web (process_escrow_refund -> session status -> issue_penalty ->
+//  ruling as the web (secure atomic dispute RPC -> issue_penalty ->
 //  repeat_offenders / admin_escalations (3+ strikes) ->
 //  report update -> mod_logs -> two notifications). Only the presentation changed.
 //  Mobile layout: one column (summary, participants, filed statement, session
@@ -11,7 +12,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useLayoutEffect } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, Modal, Alert, Linking, ActivityIndicator, StyleSheet,
+  View, Text, Image, Pressable, ScrollView, Modal, Linking, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -232,22 +233,26 @@ export default function DisputeDetails() {
     const decision = resolutionModal.decision;
     setResolutionModal({ isOpen: false, decision: null });
     setIsProcessing(true);
+    let escrowResolved = false;
 
     try {
       const winnerId = decision === 'Learner' ? session.student_id : session.instructor_id;
       const loserId = decision === 'Learner' ? session.instructor_id : session.student_id;
 
-      const newSessionStatus = decision === 'Learner' ? 'cancelled' : 'completed';
       const adjustmentAmount = Number(session.credit_amount || 0);
-
-      const { error: balanceErr } = await supabase.rpc('process_escrow_refund', {
-        target_user_id: winnerId,
-        amount: adjustmentAmount,
-      });
-      if (balanceErr) throw balanceErr;
-
-      const { error: sessionUpdateErr } = await supabase.from('sessions').update({ status: newSessionStatus }).eq('id', session.id);
-      if (sessionUpdateErr) throw sessionUpdateErr;
+      // Payout, report resolution and session outcome all commit in one RPC.
+      const { data: resolution, error: resolutionError } = await supabase.rpc(
+        'skillcredit_secure_resolve_dispute', {
+          p_report_id: report.id,
+          p_decision: decision,
+        }
+      );
+      if (resolutionError) throw resolutionError;
+      // The backend may already have committed even if the response is odd.
+      escrowResolved = true;
+      if (resolution?.state !== 'resolved' || resolution?.awarded !== true) {
+        throw new Error('Dispute response could not be verified. Check the case; do NOT retry the credit payout.');
+      }
 
       const autoNote = getDisputeAutoNote(disciplinaryAction);
       const timestamp = new Date().toLocaleString();
@@ -291,23 +296,28 @@ export default function DisputeDetails() {
             }
 
             if (disciplinaryAction === 'escalate') {
-              await supabase
-                .from('admin_escalations')
-                .insert([{
-                  user_id: loserId,
-                  repeat_offender_id: repeatOffenderId,
-                  status: 'pending',
-                }]);
+              if (!repeatOffenderId) {
+                console.warn('Escalation skipped because repeat offender record was unavailable.');
+              } else {
+                const { error: escalationError } = await supabase
+                  .from('admin_escalations')
+                  .insert([{
+                    repeat_offender_id: repeatOffenderId,
+                    moderator_id: currentUserId,
+                    status: 'pending',
+                  }]);
+                if (escalationError) console.warn('Admin escalation failed:', escalationError);
+              }
             }
           }
         }
       }
       // ────────────────────────────────────────────────────────
 
-      const newReportStatus = 'resolved';
+      // RPC already set reports.status = resolved. These are notes only.
       const updatedDetails = `${report.details}\n\n[RESOLVED - FAVOR ${decision.toUpperCase()} on ${timestamp}]: ${autoNote}`;
 
-      const { error: reportUpdateErr } = await supabase.from('reports').update({ status: newReportStatus, details: updatedDetails, mod_action_notes: autoNote }).eq('id', report.id);
+      const { error: reportUpdateErr } = await supabase.from('reports').update({ details: updatedDetails, mod_action_notes: autoNote }).eq('id', report.id);
       if (reportUpdateErr) throw reportUpdateErr;
 
       const logDetails = decision === 'Learner'
@@ -349,8 +359,13 @@ export default function DisputeDetails() {
       Alert.alert(`Dispute successfully closed in favor of the ${decision}. Action executed.`);
       goQueue();
     } catch (err) {
-      console.error(err);
-      Alert.alert('Error finalizing verdict: ' + err.message);
+      console.error('Dispute resolution failed:', err);
+      if (escrowResolved) {
+        Alert.alert('Payout already processed', 'Credits and report status were already processed. Some follow-up action may be incomplete. Do NOT retry the payout. Check the case. ' + (err?.message || ''));
+        goQueue();
+      } else {
+        Alert.alert('Error finalizing verdict: ' + (err?.message || 'Unknown error'));
+      }
     } finally {
       setIsProcessing(false);
     }

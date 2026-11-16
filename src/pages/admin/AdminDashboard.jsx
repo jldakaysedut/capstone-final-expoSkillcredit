@@ -17,7 +17,7 @@ import { BookOpen, ChevronRight, Clock, Coins, Users, Wallet, X } from 'lucide-r
 import supabase from '../../supabaseClient';
 
 // ── type colors (X-style reference)
-const T = { text: '#0f1419', sub: '#536471', line: '#eff3f4', green: '#047857' };
+const T = { text: '#0f1419', sub: '#536471', line: '#eff3f4', green: '#047857' , field: '#eff3f4', border: '#cfd9de', brand: '#047857', strip: '#f7f9f9'};
 
 // ── same helpers as the web
 const formatNumber = value => Number(value || 0).toLocaleString();
@@ -177,21 +177,26 @@ export default function AdminDashboard() {
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.green} colors={[T.green]} />}
       >
-        {/* ── platform numbers (tap = open the matching tab) */}
-        <View style={s.grid}>
-          {metrics.map(({ label, value, tab, Icon, bg, color }) => (
-            <Pressable key={label} onPress={() => navigation.navigate(tab)} style={({ pressed }) => [s.tile, pressed && { backgroundColor: '#f7f9f9' }]}>
-              <View style={[s.tileIcon, { backgroundColor: bg }]}><Icon size={18} color={color} /></View>
-              <Text style={[s.tileValue, loading && { opacity: 0.3 }]}>{dash(formatNumber(value))}</Text>
-              <Text style={s.detail}>{label}</Text>
-            </Pressable>
-          ))}
+        <View style={s.pageHead}>
+          <Text style={s.pageTitle}>Administration overview</Text>
+          <Text style={s.detail}>Platform activity and account management at a glance.</Text>
         </View>
-
+        <View style={s.sectionHead}>
+          <Text style={s.lane}>Platform overview</Text>
+          <Text style={s.detail}>Platform totals</Text>
+        </View>
+        {metrics.map(({label,value,tab,Icon,bg,color}) => (
+          <Pressable key={label} onPress={() => navigation.navigate(tab)} style={({pressed}) => [s.queueRow, pressed && {backgroundColor:T.strip}]}>
+            <View style={[s.queueIcon,{backgroundColor:bg}]}><Icon size={20} color={color} strokeWidth={1.9}/></View>
+            <View style={{flex:1}}><Text style={s.itemName}>{label}</Text><Text style={s.detail}>Tap to view {tab.toLowerCase()}</Text></View>
+            <Text style={[s.queueCount, loading && {opacity:0.3}]}>{dash(formatNumber(value))}</Text>
+            <ChevronRight size={18} color={T.border}/>
+          </Pressable>
+        ))}
         {/* ── top-up revenue */}
         <View style={s.revenue}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -217,7 +222,7 @@ export default function AdminDashboard() {
         </View>
 
         {/* ── recent top-ups */}
-        <View style={s.laneHead}>
+        <View style={[s.laneHead,{marginTop:24}]}>
           <Text style={s.lane}>Recent top-ups</Text>
         </View>
         {loading ? (
@@ -307,7 +312,7 @@ export default function AdminDashboard() {
             </View>
 
             <Pressable onPress={closeDetails} style={s.closeBtn}>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Close</Text>
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Close</Text>
             </Pressable>
           </View>
         )}
@@ -317,43 +322,49 @@ export default function AdminDashboard() {
 }
 
 const s = StyleSheet.create({
+  queueCount: { minWidth: 34, textAlign: 'right', fontSize: 24, fontWeight: '700', color: T.text, letterSpacing: -0.5 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: T.line },
+  queueIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  queueRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: T.line },
+  pageTitle: { fontSize: 20, fontWeight: '700', color: T.text, letterSpacing: -0.3, marginBottom: 2 },
+  pageHead: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
   // text
   lane: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
   itemName: { fontSize: 15, fontWeight: '600', color: T.text },
-  detail: { fontSize: 13, color: T.sub, lineHeight: 18 },
+  detail: { fontSize: 13, color: T.sub },
   link: { fontSize: 13, fontWeight: '700', color: T.green },
 
   // numbers
   grid: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: 1, borderBottomColor: T.line },
   tile: { width: '50%', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: T.line },
-  tileIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  tileValue: { fontSize: 26, fontWeight: '800', color: T.text, letterSpacing: -0.5, marginBottom: 2 },
+  tileIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  tileValue: { fontSize: 24, fontWeight: '800', color: T.text, letterSpacing: -0.4, marginBottom: 2 },
 
   // revenue card
-  revenue: { margin: 16, marginBottom: 6, backgroundColor: '#064e3b', borderRadius: 12, padding: 16 },
-  revLabel: { fontSize: 13, fontWeight: '600', color: '#d1fae5' },
-  revValue: { fontSize: 36, fontWeight: '800', color: '#fff', letterSpacing: -1, marginTop: 8 },
+  revenue: { marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 12, backgroundColor: '#064e3b' },
+  revLabel: { fontSize: 14, fontWeight: '600', color: '#d1fae5' },
+  revValue: { fontSize: 36, fontWeight: '700', color: '#fff', letterSpacing: -1 },
   revError: { marginTop: 10, fontSize: 13, lineHeight: 19, color: '#fecdd3' },
   revRow: { flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)' },
   revCol: { flex: 1 },
   revNum: { fontSize: 18, fontWeight: '800', color: '#fff' },
-  revSub: { fontSize: 12, color: '#a7f3d0', marginTop: 1 },
-  revMethods: { fontSize: 13, color: '#d1fae5', marginTop: 12 },
+  revSub: { fontSize: 13, lineHeight: 18, color: 'rgba(209,250,229,0.8)', marginTop: 10 },
+  revMethods: { fontSize: 13, lineHeight: 18, color: 'rgba(209,250,229,0.8)', marginTop: 10 },
 
   // lanes + rows
-  laneHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  laneHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: T.line },
   seeAll: { flexDirection: 'row', alignItems: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: T.line },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   empty: { alignItems: 'center', paddingVertical: 32 },
   emptyText: { fontSize: 14, color: T.sub, textAlign: 'center', paddingVertical: 28 },
 
   // details sheet
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 8 },
-  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#cfd9de', marginBottom: 8 },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, marginBottom: 4 },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '90%' },
+  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginTop: 8 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
   dRow: { paddingVertical: 12, borderTopWidth: 1, borderTopColor: T.line },
   dVal: { fontSize: 15, fontWeight: '600', color: T.text, marginTop: 3 },
-  closeBtn: { height: 48, borderRadius: 24, backgroundColor: T.green, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  closeBtn: { height: 44, borderRadius: 22, backgroundColor: T.green, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
 });

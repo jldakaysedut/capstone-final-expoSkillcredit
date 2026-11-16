@@ -118,6 +118,7 @@ export default function UserManagement() {
   const [roleFilterOpen, setRoleFilterOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const debounceRef = useRef(null);
+  const creditAdjustInFlightRef = useRef(false);
 
   // ════ DATA LOGIC: identical to the web (silent only skips the loading state on refresh) ════
   const fetchUsers = useCallback(async (silent = false) => {
@@ -185,67 +186,96 @@ export default function UserManagement() {
   };
 
   const handleCreditAdjust = async user => {
+    if (creditAdjustInFlightRef.current || savingUserId) return;
     const parsedAmount = Number.parseInt(creditAmount, 10);
     if (!creditAmount.trim() || !Number.isFinite(parsedAmount) || parsedAmount === 0) {
       setCreditError('Enter a whole number other than zero. Use a negative number to deduct credits.');
       return;
     }
 
-    const currentCredits = Number(user.credits_balance) || 0;
-    const newBalance = currentCredits + parsedAmount;
+    creditAdjustInFlightRef.current = true;
     setSavingUserId(user.id);
     setCreditError('');
     setNotice('');
-    const { error } = await supabase.from('user_profiles').update({ credits_balance: newBalance }).eq('id', user.id);
-    if (error) {
-      setCreditError('Credits could not be updated. Please try again.');
+    try {
+      // The Admin-only RPC checks authorization, locks the wallet and writes
+      // CREDIT_ADJUST admin_logs atomically. Do not log a second time here.
+      const { data, error } = await supabase.rpc('skillcredit_admin_adjust_credits', {
+        p_target_user_id: user.id,
+        p_delta: parsedAmount,
+      });
+      if (error) throw error;
+      if (data?.state !== 'adjusted' || data?.target_user_id !== user.id ||
+          !Number.isInteger(data?.new_balance)) {
+        throw new Error('Adjustment result could not be verified. Refresh the user before retrying.');
+      }
+      const newBalance = data.new_balance;
+      updateLocalUser(user.id, { credits_balance: newBalance });
+      const actionWord = parsedAmount >= 0 ? 'added to' : 'deducted from';
+      const { error: notificationError } = await supabase.from('notifications').insert({
+        user_id: user.id,
+        type: 'system_alert',
+        content: `Admin has ${actionWord} your account by ${Math.abs(parsedAmount)} credits. Your new balance is ${newBalance} CR.`,
+      });
+      if (notificationError) console.warn('Admin credit notification failed:', notificationError);
+      setNotice(`Credits updated for ${userName(user)}. New balance: ${formatNumber(newBalance)} CR.${notificationError ? ' Notification failed.' : ''}`);
+      closeModal();
+    } catch (error) {
+      console.error('Admin credit adjustment failed:', error);
+      setCreditError(error?.message || 'Cannot verify wallet update. Refresh before retrying to prevent duplicate credits.');
+    } finally {
+      creditAdjustInFlightRef.current = false;
       setSavingUserId(null);
-      return;
     }
-
-    updateLocalUser(user.id, { credits_balance: newBalance });
-    await logAdminAction(user.id, 'CREDIT_ADJUST', `Adjusted credits for ${userName(user)} by ${parsedAmount}. New balance: ${newBalance}`);
-    const actionWord = parsedAmount >= 0 ? 'added to' : 'deducted from';
-    await supabase.from('notifications').insert({
-      user_id: user.id,
-      type: 'system_alert',
-      content: `Admin has ${actionWord} your account by ${Math.abs(parsedAmount)} credits. Your new balance is ${newBalance} CR.`,
-    });
-    setNotice(`Credits updated for ${userName(user)}. New balance: ${formatNumber(newBalance)} CR.`);
-    setSavingUserId(null);
-    closeModal();
   };
 
+  // Shared Web + Expo ban operation. The database RPC synchronizes the user,
+  // existing linked escalation cases, and admin_logs in one transaction.
   const handleBanToggle = async user => {
+    if (savingUserId) return;
     const currentBanStatus = Boolean(user.is_banned);
-    const action = currentBanStatus ? 'UNBAN' : 'BAN';
     setSavingUserId(user.id);
     setNotice('');
-    const { error } = await supabase.from('user_profiles').update({ is_banned: !currentBanStatus }).eq('id', user.id);
-    if (error) {
-      setNotice(`Could not ${currentBanStatus ? 'unban' : 'ban'} ${userName(user)}. Please try again.`);
-      setSavingUserId(null);
-      return;
-    }
-
-    updateLocalUser(user.id, { is_banned: !currentBanStatus });
-    await logAdminAction(user.id, 'ACCOUNT_STATUS', `${action}NED user: ${userName(user)}`);
-    if (currentBanStatus) {
-      await supabase.from('notifications').insert({
-        user_id: user.id,
-        type: 'system',
-        content: 'Good news! Your account ban has been lifted by an Admin.',
+    try {
+      const { error } = await supabase.rpc('skillcredit_admin_change_account_ban', {
+        p_target_user_id: user.id,
+        p_is_banned: !currentBanStatus,
+        p_source: 'user_management',
+        p_note: null,
+        p_escalation_id: null,
       });
+      if (error) throw error;
+
+      // Audit history is written inside the RPC. Do not insert a duplicate log.
+      if (currentBanStatus) {
+        try {
+          const { error: notificationError } = await supabase.from('notifications').insert({
+            user_id: user.id,
+            type: 'system',
+            content: 'Good news! Your account ban has been lifted by an Admin.',
+          });
+          if (notificationError) console.warn('Ban lifted; notification failed:', notificationError);
+        } catch (notificationError) {
+          console.warn('Ban lifted; notification failed:', notificationError);
+        }
+      }
+      updateLocalUser(user.id, { is_banned: !currentBanStatus });
+      closeModal();
+      setNotice(`${userName(user)} is now ${currentBanStatus ? 'active' : 'banned'}. Linked escalations synchronized.`);
+    } catch (error) {
+      console.error('Unable to change account ban:', error);
+      setNotice(`Could not ${currentBanStatus ? 'lift ban for' : 'ban'} ${userName(user)}: ${error?.message || 'Please try again.'}`);
+    } finally {
+      setSavingUserId(null);
+      await fetchUsers(true);
     }
-    setNotice(`${userName(user)} is now ${currentBanStatus ? 'active' : 'banned'}.`);
-    setSavingUserId(null);
-    closeModal();
   };
 
   const handleConfirmAction = async () => {
     if (!activeModal) return;
-    if (activeModal.type === 'role') await handleRoleChange(activeModal.user, activeModal.newRole);
-    if (activeModal.type === 'ban') await handleBanToggle(activeModal.user);
+    const latestUser = users.find(user => user.id === activeModal.user?.id) || activeModal.user;
+    if (activeModal.type === 'role') await handleRoleChange(latestUser, activeModal.newRole);
+    if (activeModal.type === 'ban') await handleBanToggle(latestUser);
   };
 
   const filteredUsers = useMemo(() => {
@@ -317,7 +347,7 @@ export default function UserManagement() {
 
   const onRefresh = async () => { setRefreshing(true); await fetchUsers(true); setRefreshing(false); };
 
-  const modalUser = activeModal?.user;
+  const modalUser = activeModal?.user ? (users.find(user => user.id === activeModal.user.id) || activeModal.user) : null;
   const saving = !!modalUser && savingUserId === modalUser.id;
 
   // ── header of the list (search + filters + messages)
@@ -584,7 +614,7 @@ export default function UserManagement() {
       {/* ── 4. role / ban confirmation */}
       {(activeModal?.type === 'role' || activeModal?.type === 'ban') && (() => {
         const isBan = activeModal.type === 'ban';
-        const isRestoring = isBan && activeModal.user.is_banned;
+        const isRestoring = isBan && modalUser?.is_banned;
         const title = activeModal.type === 'role' ? 'Confirm role change' : isRestoring ? 'Restore account access' : 'Ban this account';
         const sub = activeModal.type === 'role' ? 'System role assignment' : 'Account status modification';
         const danger = isBan && !isRestoring;

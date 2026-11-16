@@ -1,3 +1,5 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native), src/pages/user/CreateSkill.jsx
 //  Replace the WHOLE content of your current CreateSkill.jsx with this.
@@ -5,17 +7,13 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Alert, ActivityIndicator,
-  Keyboard, BackHandler, KeyboardAvoidingView, Platform, StyleSheet,
+  Keyboard, BackHandler, Platform, StyleSheet
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import {
-  BookOpen, Briefcase, Check, ChefHat, Clock, Code2, Dumbbell, ExternalLink, FileText, Film, Hammer,
-  ImagePlus, Leaf, MessageCircle, Minus, Monitor, Music2, Palette, PenLine, PiggyBank, Plus, Rocket,
-  Scissors, Sparkles, Video, Wrench, X,
-} from 'lucide-react-native';
+import { BookOpen, Briefcase, Check, ChefHat, Clock, Code2, Dumbbell, ExternalLink, FileText, Film, Hammer, ImagePlus, Leaf, MessageCircle, Minus, Monitor, Music2, Palette, PenLine, PiggyBank, Plus, Rocket, Scissors, Sparkles, Video, Wrench, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // ── type colors (X-style)
@@ -104,6 +102,7 @@ const uploadCover = async (userId, asset) => {
 // ────────────────── MAIN SCREEN
 export default function CreateSkill() {
   const navigation = useNavigation();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const stepRef = useRef(1);
@@ -120,6 +119,27 @@ export default function CreateSkill() {
   });
 
   stepRef.current = step;
+
+  // Optional Skiro AI draft; always editable and NEVER automatically published.
+  // Whitelist categories, formats, and durations from this native form.
+  useEffect(() => {
+    const draft = route.params?.aiDraft;
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return;
+    const title = typeof draft.title === 'string' ? draft.title.trim().slice(0, 120) : '';
+    const description = typeof draft.description === 'string' ? draft.description.trim().slice(0, 2300) : '';
+    const outcomes = typeof draft.outcomes === 'string' ? draft.outcomes.trim().slice(0, 1200) : '';
+    if (!title || !description || !outcomes) return;
+    const validCat = SKILL_CATEGORIES.find((c) => c.name === draft.category);
+    const format = FORMATS.some(([name]) => name === draft.format) ? draft.format : 'Video Call';
+    const duration = DURATIONS.includes(draft.duration) ? draft.duration : '1 hr';
+    setFormData((prev) => ({
+      ...prev, title, description, outcomes,
+      category: validCat?.name || prev.category,
+      format, duration,
+      ...(validCat ? { creditCost: String(validCat.min * getHours(duration)) } : {}),
+    }));
+    setStep(2);
+  }, [route.params?.aiDraft]);
 
   // no native header (saves space); the close button lives inside the screen
   useLayoutEffect(() => { navigation.setOptions({ headerShown: false }); }, [navigation]);
@@ -315,15 +335,15 @@ export default function CreateSkill() {
         {/* ───────────── STEP 1: CATEGORY */}
         {step === 1 && (
           <View>
-            <View style={s.head}>
+            <Reveal delay={90}><View style={s.head}>
               <Text style={s.h2}>Pick a category</Text>
               <Text style={s.detail}>Sets your credit price range per hour.</Text>
-            </View>
+            </View></Reveal>
             {SKILL_CATEGORIES.map((c) => {
               const sel = formData.category === c.name;
               const Icon = c.icon;
               return (
-                <Pressable key={c.name} onPress={() => handleCategorySelect(c.name)}
+                <PressScale key={c.name} onPress={() => handleCategorySelect(c.name)}
                   style={[s.catRow, sel && { backgroundColor: c.iconColor + '12' }]}>
                   <View style={[s.catIcon, { backgroundColor: c.iconColor + '1a' }]}>
                     <Icon size={22} color={c.iconColor} />
@@ -335,7 +355,7 @@ export default function CreateSkill() {
                   <View style={[s.radio, sel && { backgroundColor: T.green, borderColor: T.green }]}>
                     {sel && <Check size={14} color="#fff" />}
                   </View>
-                </Pressable>
+                </PressScale>
               );
             })}
           </View>
@@ -456,10 +476,10 @@ export default function CreateSkill() {
         {/* ───────────── STEP 4: REVIEW + PUBLISH */}
         {step === 4 && (
           <View>
-            <View style={s.head}>
+            <Reveal delay={90}><View style={s.head}>
               <Text style={s.h2}>Review your listing</Text>
               <Text style={s.detail}>It will be reviewed by our moderation team shortly.</Text>
-            </View>
+            </View></Reveal>
 
             {/* how it will look */}
             <View style={s.preview}>
@@ -517,15 +537,15 @@ export default function CreateSkill() {
             </Pressable>
           )}
           {step < 4 ? (
-            <Pressable onPress={handleNext} style={s.nextBtn}>
+            <PressScale onPress={handleNext} style={s.nextBtn}>
               <Text style={s.nextText}>Next</Text>
-            </Pressable>
+            </PressScale>
           ) : (
-            <Pressable onPress={handlePublish} disabled={isSubmitting} style={[s.nextBtn, isSubmitting && { backgroundColor: '#9ca3af' }]}>
+            <PressScale onPress={handlePublish} disabled={isSubmitting} style={[s.nextBtn, isSubmitting && { backgroundColor: '#9ca3af' }]}>
               {isSubmitting
                 ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.nextText}>  Publishing…</Text></>
                 : <><Rocket size={18} color="#fff" /><Text style={s.nextText}>  Submit for review</Text></>}
-            </Pressable>
+            </PressScale>
           )}
         </View>
       )}
@@ -535,16 +555,16 @@ export default function CreateSkill() {
 
 const s = StyleSheet.create({
   // top
-  top: { backgroundColor: '#fff', paddingHorizontal: 16, paddingBottom: 6 },
+  top: { paddingHorizontal: 16, backgroundColor: '#F8FCF9', paddingBottom: 13, borderBottomWidth: 1, borderBottomColor: '#E2F0E8'},
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   closeBtn: { width: 44, height: 44, alignItems: 'flex-start', justifyContent: 'center' },
-  stepText: { fontSize: 15, fontWeight: '600', color: T.text },
+  stepText: { fontSize: 14, fontWeight: '700', color: '#075A41'},
   progress: { flexDirection: 'row', gap: 6, marginTop: 2 },
   seg: { height: 4, borderRadius: 2, backgroundColor: T.line },
 
   // text
-  head: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
-  h2: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
+  head: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 16},
+  h2: { fontSize: 23, fontWeight: '800', letterSpacing: -0.6, color: '#102D24'},
   itemName: { fontSize: 15, fontWeight: '600', color: T.text },
   detail: { fontSize: 13, color: T.sub, lineHeight: 18 },
   link: { fontSize: 13, fontWeight: '700', color: T.green },
@@ -552,24 +572,24 @@ const s = StyleSheet.create({
   opt: { fontWeight: '400', color: '#8b98a5' },
 
   // category list
-  catRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
-  catIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  catRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: T.line , marginHorizontal: 12, marginVertical: 4, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#DFECE5', borderRadius: 18, backgroundColor: '#FFFFFF'},
+  catIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' , borderRadius: 16},
   radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#cfd9de', alignItems: 'center', justifyContent: 'center' },
   catLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.line },
 
   // forms
-  section: { paddingHorizontal: 16, paddingTop: 16 },
-  input: { backgroundColor: T.soft, borderRadius: 12, borderWidth: 1, borderColor: T.line, paddingHorizontal: 14, height: 48, fontSize: 15, color: T.text },
-  inputIconWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: T.soft, borderRadius: 12, borderWidth: 1, borderColor: T.line, paddingHorizontal: 14, height: 48 },
+  section: { paddingHorizontal: 18, paddingTop: 19},
+  input: { borderWidth: 1, paddingHorizontal: 14, fontSize: 15, color: T.text , backgroundColor: '#F8FBF9', borderColor: '#D6E6DD', borderRadius: 15, height: 50},
+  inputIconWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, paddingHorizontal: 14, backgroundColor: '#F8FBF9', borderColor: '#D6E6DD', borderRadius: 15, height: 50},
   inputBare: { flex: 1, fontSize: 15, color: T.text, paddingVertical: 0 },
   textarea: { height: 104, paddingTop: 12, paddingBottom: 12 },
-  cover: { height: 190, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e5e7eb' },
+  cover: { height: 190, overflow: 'hidden', backgroundColor: '#e5e7eb' , borderRadius: 20},
   coverX: { position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  coverEmpty: { height: 150, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
+  coverEmpty: { height: 150, borderWidth: 1.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' , borderRadius: 20},
 
   // step 3
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  fmtCard: { width: '48.2%', borderRadius: 12, borderWidth: 1.5, borderColor: T.line, backgroundColor: '#fff', padding: 14 },
+  fmtCard: { width: '48.2%', borderWidth: 1.5, backgroundColor: '#fff', borderRadius: 19, borderColor: '#DAE9E0', padding: 16, minHeight: 94},
   seg3: { flexDirection: 'row', backgroundColor: '#f0f2f5', borderRadius: 12, padding: 4 },
   seg3Btn: { flex: 1, height: 42, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   seg3On: { backgroundColor: '#fff' },
@@ -581,7 +601,7 @@ const s = StyleSheet.create({
   preset: { height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
 
   // step 4
-  preview: { marginHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: T.line, overflow: 'hidden' },
+  preview: { marginHorizontal: 16, borderWidth: 1, overflow: 'hidden' , borderRadius: 20, borderColor: '#DCECE2'},
   previewCover: { height: 150, alignItems: 'center', justifyContent: 'center' },
   priceBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   priceText: { color: '#fff', fontSize: 14, fontWeight: '700' },
@@ -595,6 +615,6 @@ const s = StyleSheet.create({
   // bottom bar
   bottom: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: T.line, backgroundColor: '#fff' },
   backBtn: { flex: 1, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#cfd9de', alignItems: 'center', justifyContent: 'center' },
-  nextBtn: { flex: 2, height: 48, borderRadius: 24, backgroundColor: T.green, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  nextBtn: { flex: 2, backgroundColor: T.green, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' , borderRadius: 17, height: 51, shadowColor: '#047857', shadowOpacity: 0.12, shadowRadius: 9, shadowOffset: {width:0,height:4}, elevation: 2},
   nextText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 });

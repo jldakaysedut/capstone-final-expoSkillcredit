@@ -1,12 +1,12 @@
+import { Reveal } from '../../components/premium/PremiumVisual';
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, Modal, Linking, RefreshControl, Animated, StyleSheet,
+  Modal, Linking, RefreshControl, Animated, StyleSheet
 } from 'react-native';
+import { View, Text, Image, Pressable, ScrollView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  CalendarDays, ChevronRight, ClipboardList, Clock3, ExternalLink, FolderOpen, Mail, Paperclip, SearchX, Star, X,
-} from 'lucide-react-native';
+import { CalendarDays, ChevronRight, ClipboardList, Clock3, ExternalLink, FolderOpen, Mail, Paperclip, SearchX, Star, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // Compact X-style layout: cover + overlapping avatar, inline stats, underline tabs, hairline rows
@@ -36,18 +36,9 @@ const Stars = ({ value, size = 13 }) => (
   </View>
 );
 
-const Skeleton = ({ style }) => {
-  const o = useRef(new Animated.Value(0.55)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(o, { toValue: 1, duration: 750, useNativeDriver: true }),
-      Animated.timing(o, { toValue: 0.55, duration: 750, useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [o]);
-  return <Animated.View style={[{ backgroundColor: T.line, borderRadius: 6, opacity: o }, style]} />;
-};
+const Skeleton = ({ style }) => (
+  <View style={[{ backgroundColor: '#e9eff0', borderRadius: 6 }, style]} />
+);
 
 const ProfileSkeleton = () => (
   <View style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -185,7 +176,7 @@ export default function PublicProfile() {
         {/* 0 · cover, identity, stats */}
         <View>
           <View style={s.cover} />
-          <View style={s.head}>
+          <Reveal delay={90}><View style={s.head}>
             <View style={s.idRow}>
               <View style={s.avatarRing}><Avatar uri={profile.avatar_url} name={profile.full_name} size={84} /></View>
             </View>
@@ -214,7 +205,7 @@ export default function PublicProfile() {
                 <Text style={s.statNum}>{stats.avgRating > 0 ? stats.avgRating.toFixed(1) : '0.0'}</Text>
               </View>
             </View>
-          </View>
+          </View></Reveal>
         </View>
 
         {/* 1 · sticky tabs (row lives one level inside the sticky container) */}
@@ -357,25 +348,25 @@ const s = StyleSheet.create({
   fill: { width: '100%', height: '100%' },
 
   // cover + identity
-  cover: { height: 104, backgroundColor: T.border },
-  head: { paddingHorizontal: 16 },
+  cover: { height: 114, backgroundColor: '#B5E8D0'},
+  head: { paddingHorizontal: 18},
   idRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: -44 },
-  avatarRing: { padding: 4, marginLeft: -4, borderRadius: 50, backgroundColor: '#fff' },
-  name: { fontSize: 20, fontWeight: '700', color: T.text, letterSpacing: -0.3, marginTop: 10 },
+  avatarRing: { padding: 4, marginLeft: -4, borderRadius: 50, borderWidth: 2, borderColor: '#D0EDDD', backgroundColor: '#FFFFFF'},
+  name: { marginTop: 10 , fontSize: 23, fontWeight: '800', letterSpacing: -0.6, color: '#0A3E2C'},
   joinedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   handle: { fontSize: 14, lineHeight: 18, color: T.sub },
-  bio: { fontSize: 15, lineHeight: 21, color: T.text, marginTop: 12 },
+  bio: { fontSize: 15, color: T.text, marginTop: 12 , lineHeight: 23},
   infoWrap: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 6, marginTop: 12 },
   infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
   infoText: { fontSize: 13, lineHeight: 18, color: T.sub, flexShrink: 1 },
-  stats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, marginTop: 12, paddingBottom: 14 },
+  stats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, paddingBottom: 19, marginTop: 15},
   statLabel: { fontSize: 14, color: T.sub },
   statNum: { fontSize: 14, fontWeight: '700', color: T.text },
   ratingInline: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
   // tabs
   tabsSticky: { backgroundColor: '#fff' },
-  tabs: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: T.line, borderTopWidth: 1, borderTopColor: T.line },
+  tabs: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#fff', borderBottomWidth: 1, borderTopWidth: 1, borderBottomColor: '#DCEEE3', borderTopColor: '#DCEEE3'},
   tab: { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
   tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   tabText: { fontSize: 15, fontWeight: '600', color: T.sub },
@@ -384,14 +375,14 @@ const s = StyleSheet.create({
   tabBar: { position: 'absolute', bottom: 0, width: 44, height: 3, borderRadius: 2, backgroundColor: 'transparent' },
 
   // rows
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E2EFE6', paddingVertical: 16},
   thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: T.field, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   rowTitle: { flexShrink: 1, fontSize: 15, fontWeight: '700', color: T.text },
   rowSub: { fontSize: 13, color: T.sub, marginTop: 1 },
-  price: { fontSize: 14, fontWeight: '700', color: T.brand, marginTop: 3 },
+  price: { fontSize: 14, marginTop: 3 , fontWeight: '800', color: '#08775A'},
 
   // reviews
-  summary: { flexDirection: 'row', alignItems: 'center', gap: 20, paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: T.line },
+  summary: { flexDirection: 'row', alignItems: 'center', gap: 20, paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, backgroundColor: '#F6FBF8', borderBottomColor: '#D8EFE0'},
   ratingCol: { alignItems: 'center', gap: 4, minWidth: 84 },
   bigRating: { fontSize: 30, fontWeight: '700', color: T.text, letterSpacing: -0.5 },
   dimLbl: { width: 88, fontSize: 13, color: T.sub },
@@ -410,7 +401,7 @@ const s = StyleSheet.create({
 
   // sheet
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginTop: 8 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
   sheetTitle: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },

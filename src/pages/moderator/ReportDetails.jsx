@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/ReportDetails.jsx
 //  Same queries, same conflict-of-interest guard, same claim step and the SAME
@@ -12,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useLayoutEffect } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, Modal, Alert, ActivityIndicator, StyleSheet,
+  View, Text, Image, Pressable, ScrollView, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

@@ -1,16 +1,15 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Alert, Linking, RefreshControl, Animated,
-  ActivityIndicator, KeyboardAvoidingView, Platform, AppState, DeviceEventEmitter, StyleSheet,
+  Modal, Linking, RefreshControl, Animated, Platform, AppState, DeviceEventEmitter, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import {
-  Camera, CalendarDays, ClipboardList, Clock3, ExternalLink, FileText, FolderOpen, ImagePlus, Mail,
-  Paperclip, Pencil, Plus, Star, Trash2, X,
-} from 'lucide-react-native';
+import { Camera, CalendarDays, ClipboardList, Clock3, ExternalLink, FileText, FolderOpen, ImagePlus, Mail, Paperclip, Pencil, Plus, Star, Trash2, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // Compact X-style layout: cover + overlapping avatar, inline stats, underline tabs, hairline rows
@@ -87,18 +86,9 @@ const Stars = ({ value, size = 13 }) => (
   </View>
 );
 
-const Skeleton = ({ style }) => {
-  const o = useRef(new Animated.Value(0.55)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(o, { toValue: 1, duration: 750, useNativeDriver: true }),
-      Animated.timing(o, { toValue: 0.55, duration: 750, useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [o]);
-  return <Animated.View style={[{ backgroundColor: T.line, borderRadius: 6, opacity: o }, style]} />;
-};
+const Skeleton = ({ style }) => (
+  <View style={[{ backgroundColor: '#e9eff0', borderRadius: 6 }, style]} />
+);
 
 const ProfileSkeleton = () => (
   <View style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -273,6 +263,16 @@ export default function Profile() {
     return () => { disposed = true; appSub.remove(); if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, [fetchAll]);
 
+  useEffect(() => {
+    const liveChannel = supabase.channel('profile_relations_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, fetchAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_items' }, fetchAll)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sessions' }, fetchAll)
+      .subscribe();
+    const offFocus = navigation.addListener('focus', fetchAll);
+    return () => { offFocus(); supabase.removeChannel(liveChannel); };
+  }, [fetchAll, navigation]);
+
   const onRefresh = async () => { setRefreshing(true); await fetchAll(); setRefreshing(false); };
 
   // ── avatar
@@ -374,7 +374,7 @@ export default function Profile() {
         {/* 0 · cover, identity, stats */}
         <View>
           <View style={s.cover} />
-          <View style={s.head}>
+          <Reveal delay={90}><View style={s.head}>
             <View style={s.idRow}>
               <Pressable onPress={pickAvatar} disabled={uploadingAvatar}>
                 <View style={s.avatarRing}><Avatar uri={pendingAvatar?.uri || profile.avatar_url} name={profile.full_name} size={84} /></View>
@@ -385,9 +385,9 @@ export default function Profile() {
                 {pendingAvatar ? (
                   <>
                     <Pressable onPress={() => setPendingAvatar(null)} disabled={uploadingAvatar} style={s.outlineBtn}><Text style={s.outlineBtnText}>Cancel</Text></Pressable>
-                    <Pressable onPress={saveAvatar} disabled={uploadingAvatar} style={s.fillBtnSm}>
+                    <PressScale onPress={saveAvatar} disabled={uploadingAvatar} style={s.fillBtnSm}>
                       {uploadingAvatar ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.fillBtnSmText}>Save photo</Text>}
-                    </Pressable>
+                    </PressScale>
                   </>
                 ) : (
                   <Pressable onPress={openEdit} style={({ pressed }) => [s.outlineBtn, pressed && { backgroundColor: T.strip }]}>
@@ -419,7 +419,7 @@ export default function Profile() {
                 <Text style={s.statNum}>{stats.avgRating > 0 ? stats.avgRating.toFixed(1) : '0.0'}</Text>
               </View>
             </View>
-          </View>
+          </View></Reveal>
         </View>
 
         {/* 1 · sticky tabs */}
@@ -446,7 +446,7 @@ export default function Profile() {
             <View>
               <Toolbar label={`${mySkills.length} active ${mySkills.length === 1 ? 'listing' : 'listings'}`} action="New listing" onAction={() => navigation.navigate('CreateSkill')} />
               {mySkills.length === 0
-                ? <Empty Icon={ClipboardList} title="No listings yet" sub="Share your expertise with the community." cta="Create first listing" onCta={() => navigation.navigate('CreateSkill')} />
+                ? <Empty Icon={ClipboardList} title="No listings yet" sub="Share your expertise with the community." />
                 : mySkills.map((k) => (
                   <Pressable key={k.id} onPress={() => navigation.navigate('SkillDetails', { id: k.id })} style={({ pressed }) => [s.row, pressed && { backgroundColor: T.strip }]}>
                     <View style={s.thumb}>{k.cover_image_url ? <Image source={{ uri: k.cover_image_url }} style={s.fill} /> : <ClipboardList size={22} color={T.border} strokeWidth={1.6} />}</View>
@@ -465,7 +465,7 @@ export default function Profile() {
             <View>
               <Toolbar label={`${portfolio.length} ${portfolio.length === 1 ? 'project' : 'projects'}`} action="Add project" onAction={openAdd} />
               {portfolio.length === 0
-                ? <Empty Icon={FolderOpen} title="No portfolio items yet" sub="Showcase your best work to attract learners." cta="Add first project" onCta={openAdd} />
+                ? <Empty Icon={FolderOpen} title="No portfolio items yet" sub="Showcase your best work to attract learners." />
                 : portfolio.map((p) => (
                   <Pressable key={p.id} onPress={() => setSelected(p)} style={({ pressed }) => [s.row, pressed && { backgroundColor: T.strip }]}>
                     <View style={s.thumb}>{p.image_url ? <Image source={{ uri: p.image_url }} style={s.fill} /> : <FolderOpen size={22} color={T.border} strokeWidth={1.6} />}</View>
@@ -608,29 +608,29 @@ const s = StyleSheet.create({
   fill: { width: '100%', height: '100%' },
 
   // cover + identity
-  cover: { height: 104, backgroundColor: T.border },
-  head: { paddingHorizontal: 16 },
+  cover: { height: 114, backgroundColor: '#B5E8D0'},
+  head: { paddingHorizontal: 18},
   idRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: -44 },
-  avatarRing: { padding: 4, marginLeft: -4, borderRadius: 50, backgroundColor: '#fff' },
+  avatarRing: { padding: 4, marginLeft: -4, borderRadius: 50, borderWidth: 2, borderColor: '#D0EDDD', backgroundColor: '#FFFFFF'},
   camBadge: { position: 'absolute', right: 2, bottom: 2, width: 28, height: 28, borderRadius: 14, backgroundColor: T.text, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
   headActions: { flexDirection: 'row', gap: 8, paddingBottom: 6 },
   outlineBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'flex-start', height: 36, paddingHorizontal: 16, borderRadius: 18, borderWidth: 1, borderColor: T.border, backgroundColor: '#fff' },
   outlineBtnText: { fontSize: 14, fontWeight: '700', color: T.text },
-  name: { fontSize: 20, fontWeight: '700', color: T.text, letterSpacing: -0.3, marginTop: 10 },
+  name: { marginTop: 10 , fontSize: 23, fontWeight: '800', letterSpacing: -0.6, color: '#0A3E2C'},
   joinedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   handle: { fontSize: 14, lineHeight: 18, color: T.sub },
-  bio: { fontSize: 15, lineHeight: 21, color: T.text, marginTop: 12 },
+  bio: { fontSize: 15, color: T.text, marginTop: 12 , lineHeight: 23},
   infoWrap: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 6, marginTop: 12 },
   infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
   infoText: { fontSize: 13, lineHeight: 18, color: T.sub, flexShrink: 1 },
-  stats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, marginTop: 12, paddingBottom: 14 },
+  stats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, paddingBottom: 19, marginTop: 15},
   statLabel: { fontSize: 14, color: T.sub },
   statNum: { fontSize: 14, fontWeight: '700', color: T.text },
   ratingInline: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
   // tabs
   tabsSticky: { backgroundColor: '#fff' },
-  tabs: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: T.line, borderTopWidth: 1, borderTopColor: T.line },
+  tabs: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#fff', borderBottomWidth: 1, borderTopWidth: 1, borderBottomColor: '#DCEEE3', borderTopColor: '#DCEEE3'},
   tab: { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' },
   tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   tabText: { fontSize: 15, fontWeight: '600', color: T.sub },
@@ -638,13 +638,13 @@ const s = StyleSheet.create({
   tabCount: { fontSize: 13, color: T.sub },
   tabBar: { position: 'absolute', bottom: 0, width: 44, height: 3, borderRadius: 2, backgroundColor: 'transparent' },
 
-  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
+  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, backgroundColor: '#F7FCF9', borderBottomColor: '#E3F0E7'},
   toolbarLabel: { fontSize: 13, color: T.sub },
-  fillBtnSm: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: T.brand },
+  fillBtnSm: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 14, backgroundColor: T.brand , borderRadius: 13, height: 37},
   fillBtnSmText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
   // rows
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E2EFE6', paddingVertical: 16},
   thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: T.field, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   rowTitle: { flexShrink: 1, fontSize: 15, fontWeight: '700', color: T.text },
   rowSub: { fontSize: 13, color: T.sub, marginTop: 1 },
@@ -673,7 +673,7 @@ const s = StyleSheet.create({
 
   // sheets
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginTop: 8 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
   sheetTitle: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },

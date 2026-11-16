@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/auth/SetupInterests.jsx
 //  Mobile version (same data + logic as the web SetupInterests),
@@ -6,38 +7,37 @@
 //  Needs:  npx expo install @react-native-async-storage/async-storage
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
+import {
+  StyleSheet
+} from 'react-native';
+import { View, Text, Pressable, ScrollView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  ChefHat, Leaf, Hammer, Dumbbell, Scissors, Gamepad2, Wrench,
-  BookOpen, PenLine, MessageCircle, Music2, Palette, Film, Briefcase,
-  PiggyBank, Monitor, Code2, Sparkles, Check,
-} from 'lucide-react-native';
+import { ChefHat, Leaf, Hammer, Dumbbell, Scissors, Wrench, BookOpen, PenLine, MessageCircle, Music2, Palette, Film, Briefcase, PiggyBank, Monitor, Code2, Sparkles, Check } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import { Reveal, PressScale, SoftPulse } from '../../components/premium/PremiumVisual';
 
 // Route names used by this screen (the web used '/login' and '/dashboard'). Change them here if yours differ.
 const ROUTES = { login: 'Login', home: 'User' };
 
 const CATEGORIES = [
-  { name: 'Coding & Tech',         icon: Code2,         color: '#65a30d' },
-  { name: 'UI/UX Design',          icon: Monitor,       color: '#0ea5e9' },
-  { name: 'Business & Freelance',  icon: Briefcase,     color: '#475569' },
-  { name: 'Financial Literacy',    icon: PiggyBank,     color: '#059669' },
-  { name: 'Writing & Content',     icon: PenLine,       color: '#14b8a6' },
-  { name: 'Art & Graphic Design',  icon: Palette,       color: '#f43f5e' },
-  { name: 'Video & Animation',     icon: Film,          color: '#f59e0b' },
-  { name: 'Languages & Speaking',  icon: MessageCircle, color: '#06b6d4' },
-  { name: 'School & Tutoring',     icon: BookOpen,      color: '#6366f1' },
-  { name: 'Health & Fitness',      icon: Dumbbell,      color: '#ef4444' },
+  { name: 'Coding & Programming',         icon: Code2,         color: '#65a30d' },
+  { name: 'Website & App Design',          icon: Monitor,       color: '#0ea5e9' },
+  { name: 'Business, Entrepreneurship & Marketing',  icon: Briefcase,     color: '#475569' },
+  { name: 'Finance, Investing & Trading',    icon: PiggyBank,     color: '#059669' },
+  { name: 'Writing & Editing',     icon: PenLine,       color: '#14b8a6' },
+  { name: 'Graphic Design & Digital Art',  icon: Palette,       color: '#f43f5e' },
+  { name: 'Video, Animation & AI Content Creation',     icon: Film,          color: '#f59e0b' },
+  { name: 'Languages & Public Speaking',  icon: MessageCircle, color: '#06b6d4' },
+  { name: 'School Subjects & Tutoring',     icon: BookOpen,      color: '#6366f1' },
+  { name: 'Fitness & Sports',      icon: Dumbbell,      color: '#ef4444' },
   { name: 'Cooking & Baking',      icon: ChefHat,       color: '#f97316' },
-  { name: 'Singing & Instruments', icon: Music2,        color: '#d946ef' },
-  { name: 'Gaming & Hobbies',      icon: Gamepad2,      color: '#8b5cf6' },
-  { name: 'Beauty & Grooming',     icon: Scissors,      color: '#ec4899' },
-  { name: 'Home & DIY',            icon: Hammer,        color: '#ca8a04' },
-  { name: 'Gardening & Farming',   icon: Leaf,          color: '#22c55e' },
-  { name: 'Electronics & Repair',  icon: Wrench,        color: '#3b82f6' },
+  { name: 'Music & Singing', icon: Music2,        color: '#d946ef' },
+  { name: 'Beauty & Personal Care',     icon: Scissors,      color: '#ec4899' },
+  { name: 'Home Repair & DIY',            icon: Hammer,        color: '#ca8a04' },
+  { name: 'Gardening & Plant Care',   icon: Leaf,          color: '#22c55e' },
+  { name: 'Computer, Phone & Electronics Help',  icon: Wrench,        color: '#3b82f6' },
 ];
 
 export default function SetupInterests() {
@@ -85,7 +85,7 @@ export default function SetupInterests() {
       // 1. Get the current data first
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('credits_balance, has_set_interests')
+        .select('has_set_interests')
         .eq('id', user.id)
         .single();
 
@@ -95,18 +95,13 @@ export default function SetupInterests() {
         return;
       }
 
-      const currentBalance = profile?.credits_balance || 0;
-
-      // Avoid ending up with 40: if it is 0 make it 20, if the DB default already gave 20 keep it
-      const finalBalance = currentBalance === 0 ? 20 : currentBalance;
-
-      // 2. One update for interests, flag and balance
+      // 2. Interests setup must never write wallet credits. Signup's existing
+      // one-time 20 CR bonus is handled by registration/server-side rules.
       const { error } = await supabase
         .from('user_profiles')
         .update({
           interests: selected,
           has_set_interests: true,
-          credits_balance: finalBalance,
         })
         .eq('id', user.id);
 
@@ -151,7 +146,7 @@ export default function SetupInterests() {
   if (isSaving) {
     return (
       <View style={s.savingWrap}>
-        <View style={s.savingIcon}><Sparkles size={34} color="#047857" /></View>
+        <SoftPulse style={s.savingIcon}><Sparkles size={34} color="#047857" /></SoftPulse>
         <Text style={s.savingTag}>SkillCredit setup</Text>
         <Text style={s.savingTitle}>Preparing your dashboard…</Text>
         <Text style={s.savingSub}>Curating skills and building recommendations based on your selected interests.</Text>
@@ -168,29 +163,40 @@ export default function SetupInterests() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-        <View style={[s.header, { paddingTop: insets.top + 24 }]}>
-          <View style={s.headIcon}><Sparkles size={22} color="#047857" /></View>
-          <Text style={s.title}>What are you interested in?</Text>
-          <Text style={s.sub}>
-            Pick a few topics you'd like to learn or teach. We'll use this to personalize your SkillCredit dashboard.
-          </Text>
-        </View>
+    <View style={s.screen}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+        <Reveal>
+          <View style={[s.header, { paddingTop: insets.top + 30 }]}>
+            <View pointerEvents="none" style={s.heroOrbLarge} />
+            <View pointerEvents="none" style={s.heroOrbSmall} />
+            <View style={s.headIcon}><Sparkles size={23} color="#d1fae5" /></View>
+            <Text style={s.eyebrow}>PERSONALIZE YOUR JOURNEY</Text>
+            <Text style={s.title}>What are you interested in?</Text>
+            <Text style={s.sub}>
+              Pick a few topics you'd like to learn or teach. We'll use this to personalize your SkillCredit dashboard.
+            </Text>
+          </View>
+        </Reveal>
 
-        <View style={s.chips}>
+        <Reveal delay={90}>
+          <View style={s.chipsHeader}>
+            <Text style={s.chipsHeading}>Explore your interests</Text>
+            <Text style={s.chipsHint}>Select what excites you</Text>
+          </View>
+          <View style={s.chips}>
           {CATEGORIES.map((cat) => {
             const on = selected.includes(cat.name);
             const Icon = cat.icon;
             return (
-              <Pressable key={cat.name} onPress={() => toggleCategory(cat.name)} style={[s.chip, on && s.chipOn]}>
-                <Icon size={16} color={on ? '#fff' : cat.color} />
-                <Text style={[s.chipText, on && { color: '#fff' }]}>{cat.name}</Text>
-                {on && <Check size={15} color="#fff" />}
-              </Pressable>
+              <PressScale key={cat.name} onPress={() => toggleCategory(cat.name)} style={[s.chip, on && s.chipOn]}>
+                <Icon size={17} color={on ? '#047857' : cat.color} />
+                <Text style={[s.chipText, on && s.chipTextOn]}>{cat.name}</Text>
+                {on && <Check size={16} color="#047857" />}
+              </PressScale>
             );
           })}
-        </View>
+          </View>
+        </Reveal>
       </ScrollView>
 
       {/* bottom bar */}
@@ -198,40 +204,48 @@ export default function SetupInterests() {
         <Text style={s.barText}>
           {selected.length === 0 ? 'Select at least 1 topic' : `${selected.length} ${selected.length === 1 ? 'topic' : 'topics'} selected`}
         </Text>
-        <Pressable
+        <PressScale
           onPress={handleSave}
           disabled={selected.length === 0 || isSaving}
           style={[s.btn, selected.length === 0 && { opacity: 0.4 }]}
         >
           <Text style={s.btnText}>Continue</Text>
-        </Pressable>
+        </PressScale>
       </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  // header
-  header: { paddingHorizontal: 20, paddingBottom: 18 },
-  headIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  title: { fontSize: 22, fontWeight: '700', color: '#0f1419', letterSpacing: -0.3 },
-  sub: { fontSize: 15, color: '#536471', lineHeight: 21, marginTop: 6 },
+  // premium onboarding hero (presentation only)
+  screen: { flex: 1, backgroundColor: '#f4f8f6' },
+  header: { backgroundColor: '#064e3b', paddingHorizontal: 24, paddingBottom: 36, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, overflow: 'hidden' },
+  heroOrbLarge: { position: 'absolute', right: -70, top: -30, height: 230, width: 230, borderRadius: 115, backgroundColor: 'rgba(110,231,183,0.11)' },
+  heroOrbSmall: { position: 'absolute', right: 16, bottom: -45, height: 135, width: 135, borderRadius: 68, borderWidth: 2, borderColor: 'rgba(209,250,229,0.12)' },
+  headIcon: { width: 52, height: 52, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  eyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 2.1, color: '#a7f3d0', marginBottom: 10 },
+  title: { fontSize: 29, lineHeight: 35, fontWeight: '800', color: '#ffffff', letterSpacing: -0.8, maxWidth: 310 },
+  sub: { fontSize: 14, color: '#d1fae5', lineHeight: 22, marginTop: 10, maxWidth: 340 },
 
-  // chips
+  // elevated selection cards
+  chipsHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 26, paddingBottom: 14, gap: 8 },
+  chipsHeading: { color: '#103d30', fontSize: 17, fontWeight: '800', letterSpacing: -0.35 },
+  chipsHint: { fontSize: 11, color: '#698478', fontWeight: '500' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 20 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#eff3f4' },
-  chipOn: { backgroundColor: '#0f1419' },
-  chipText: { fontSize: 14, fontWeight: '600', color: '#0f1419' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 46, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e1eae5', shadowColor: '#064e3b', shadowOpacity: 0.045, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 1 },
+  chipOn: { backgroundColor: '#e4f8ec', borderColor: '#34a874', shadowOpacity: 0.08 },
+  chipText: { fontSize: 13, fontWeight: '700', color: '#234639' },
+  chipTextOn: { color: '#065f46' },
 
-  // bottom bar
-  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#eff3f4', backgroundColor: '#fff' },
-  barText: { flex: 1, fontSize: 13, color: '#536471' },
-  btn: { height: 44, paddingHorizontal: 28, borderRadius: 22, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center' },
-  btnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  // anchored CTA
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e2eae5', backgroundColor: '#ffffff', elevation: 7, shadowColor: '#064e3b', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: -4 } },
+  barText: { flex: 1, fontSize: 13, color: '#526d60', fontWeight: '600' },
+  btn: { height: 48, paddingHorizontal: 29, borderRadius: 16, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center', shadowColor: '#047857', shadowOpacity: 0.18, shadowRadius: 9, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+  btnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
 
   // saving screen
-  savingWrap: { flex: 1, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  savingIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+  savingWrap: { flex: 1, backgroundColor: '#f4f8f6', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  savingIcon: { width: 76, height: 76, borderRadius: 25, backgroundColor: '#d1fae5', alignItems: 'center', justifyContent: 'center', marginBottom: 22, shadowColor: '#047857', shadowOpacity: 0.15, shadowRadius: 16, elevation: 6 },
   savingTag: { fontSize: 13, fontWeight: '600', color: '#047857' },
   savingTitle: { fontSize: 20, fontWeight: '700', color: '#0f1419', letterSpacing: -0.2, marginTop: 4 },
   savingSub: { fontSize: 14, color: '#536471', lineHeight: 20, textAlign: 'center', marginTop: 8, maxWidth: 280 },
@@ -239,6 +253,6 @@ const s = StyleSheet.create({
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   progressLabel: { fontSize: 13, color: '#536471' },
   progressPct: { fontSize: 13, fontWeight: '700', color: '#047857' },
-  track: { height: 4, borderRadius: 2, backgroundColor: '#eff3f4', overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 2, backgroundColor: '#047857' },
+  track: { height: 8, borderRadius: 4, backgroundColor: '#deece4', overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 4, backgroundColor: '#10b981' },
 });

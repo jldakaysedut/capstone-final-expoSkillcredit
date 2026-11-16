@@ -1,19 +1,19 @@
+import { Alert } from '../components/SkillCreditAlert';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Alert, Animated, PanResponder, AppState,
-  DeviceEventEmitter, KeyboardAvoidingView, Platform, ActivityIndicator, useWindowDimensions, StyleSheet,
+  Modal, Animated, PanResponder, AppState, DeviceEventEmitter, Platform, useWindowDimensions, StyleSheet, StatusBar
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import {
-  AlertTriangle, ArrowRight, Bell, BellRing, CalendarDays, CheckCheck, ChevronRight, Coins, Compass,
-  CreditCard, Globe, GripVertical, ImagePlus, LayoutList, LifeBuoy, LogOut, MessageCircle, MessageSquare,
-  Paperclip, PlayCircle, Scale, Settings, Shield, ShieldAlert, ShieldCheck, Star, Trophy, User, X,
-} from 'lucide-react-native';
+import { AlertTriangle, ArrowRight, Bell, BellRing, Moon, Sun, CalendarDays, CheckCheck, ChevronRight, Coins, Compass, CreditCard, Globe, GripVertical, ImagePlus, LayoutList, LifeBuoy, LogOut, MessageCircle, MessageSquare, Paperclip, PlayCircle, Scale, Settings, Shield, ShieldAlert, ShieldCheck, Star, Trophy, User, X } from '../components/premium/PremiumThemeIcons';
 import supabase from '../supabaseClient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUserTheme } from '../components/premium/PremiumTheme';
+import { View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView, ActivityIndicator, useThemeStyle } from '../components/premium/PremiumThemePrimitives';
+import { prefersReducedMotion } from '../components/premium/PremiumVisual';
 
 // the five bottom tabs (were the desktop nav links) -- adjust these paths to where your pages live
 import UserDashboard from '../pages/user/UserDashboard';
@@ -71,6 +71,8 @@ const getNotificationMeta = (type) => {
     case 'session_update':
     case 'session_completed':   return { Icon: CheckCheck,    tone: 'emerald', badge: type === 'session_completed' ? 'Completed' : 'Session Update' };
     case 'session_cancelled':   return { Icon: AlertTriangle, tone: 'gray',    badge: 'Cancelled' };
+    case 'session_reminder_1h': return { Icon: CalendarDays,  tone: 'emerald', badge: 'Session Reminder' };
+    case 'daily_reward':        return { Icon: Coins,         tone: 'amber',   badge: 'Daily Reward' };
     case 'new_rating':          return { Icon: Star,          tone: 'amber',   badge: 'New Rating' };
 
     default:                    return { Icon: BellRing,      tone: 'gray',    badge: 'Notice' };
@@ -219,6 +221,7 @@ const BTN_W = 48;
 const BTN_H = 48;
 
 const FloatingHelpButton = ({ bottomOffset }) => {
+  const themedFab = useThemeStyle(s.fab);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [isOpen, setIsOpen] = useState(false);
@@ -347,7 +350,7 @@ const FloatingHelpButton = ({ bottomOffset }) => {
     <>
       <Animated.View
         {...responder.panHandlers}
-        style={[s.fab, { bottom: bottomOffset, transform: pan.getTranslateTransform() }]}
+        style={[themedFab, { bottom: bottomOffset, transform: pan.getTranslateTransform() }]}
         accessibilityLabel="Drag support button to move, or tap to contact support"
       >
         <LifeBuoy size={24} color={T.brand} strokeWidth={1.8} />
@@ -451,9 +454,47 @@ function TopBar({ profile, unreadCount, onBrand, onProfile, onCredits }) {
 // ────────────────────── MAIN LAYOUT
 const Tab = createBottomTabNavigator();
 
+// Native focus transition for the five existing tab routes. Screen components
+// retain their same props, routes and state; no unmounts or navigation rewrites.
+const withTabEntrance = (Screen) => {
+  function AnimatedTabScreen(props) {
+    const focused = useIsFocused();
+    const fade = useRef(new Animated.Value(1)).current;
+    const slide = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+      if (!focused) return undefined;
+      let alive = true;
+      let animation;
+      const start = (reduced) => {
+        if (!alive) return;
+        if (reduced) { fade.setValue(1); slide.setValue(0); return; }
+        fade.setValue(Platform.OS === 'android' ? 0.88 : 0.82); slide.setValue(Platform.OS === 'android' ? 4 : 7);
+        animation = Animated.parallel([
+          Animated.timing(fade, { toValue: 1, duration: Platform.OS === 'android' ? 145 : 190, useNativeDriver: true }),
+          Animated.timing(slide, { toValue: 0, duration: Platform.OS === 'android' ? 145 : 190, useNativeDriver: true }),
+        ]);
+        animation.start();
+      };
+      prefersReducedMotion().then(start).catch(() => start(false));
+      return () => { alive = false; animation?.stop(); fade.setValue(1); slide.setValue(0); };
+    }, [focused, fade, slide]);
+    return <Animated.View style={{ flex: 1, opacity: fade, transform: [{ translateY: slide }] }}>
+      <Screen {...props} />
+    </Animated.View>;
+  }
+  AnimatedTabScreen.displayName = `AnimatedTab${Screen.displayName || Screen.name || 'Screen'}`;
+  return AnimatedTabScreen;
+};
+const AnimatedDashboard = withTabEntrance(UserDashboard);
+const AnimatedCommunity = withTabEntrance(Community);
+const AnimatedSessions = withTabEntrance(Sessions);
+const AnimatedMessages = withTabEntrance(Messages);
+const AnimatedLeaderboard = withTabEntrance(Leaderboard);
+
 export default function UserLayout() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { isDark, toggleDark } = useUserTheme();
 
   const [profile, setProfile] = useState({ id: '', full_name: '', credits_balance: 0, avatar_url: '', is_banned: false });
   const [notifications, setNotifications] = useState([]);
@@ -474,6 +515,8 @@ export default function UserLayout() {
     let currentUserId = null;
     let creditSub = null;
     let appSub = null;
+    let reminderInterval = null;
+    let checkingReminders = false;
     const channelSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
     const publishNotification = (notification, showToast = true) => {
@@ -523,6 +566,46 @@ export default function UserLayout() {
       }
     };
 
+    // App-foreground 1-hour reminders. Same schedule and dedupe as Web:
+    // no push credentials, cron, extra tables, or native notification permissions.
+    const checkReminders = async (uid) => {
+      if (!uid || disposed || checkingReminders || AppState.currentState !== 'active') return;
+      checkingReminders = true;
+      try {
+        const { data, error } = await supabase.from('sessions')
+          .select('id, student_id, instructor_id, scheduled_date, scheduled_time, status, skill:skills(title)')
+          .eq('status', 'upcoming')
+          .or(`student_id.eq.${uid},instructor_id.eq.${uid}`);
+        if (error) throw error;
+        for (const session of (data || [])) {
+          if (disposed) break;
+          const date = String(session.scheduled_date || '');
+          const time = String(session.scheduled_time || '');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}/.test(time)) continue;
+          const starts = Date.parse(`${date}T${time.slice(0, 5)}:00+08:00`);
+          const minutes = (starts - Date.now()) / 60000;
+          if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 60) continue;
+          const link = `/sessions?session=${session.id}`;
+          const cacheKey = `skillcredit:reminder1h:${uid}:${session.id}:${date}:${time.slice(0, 5)}`;
+          if (await AsyncStorage.getItem(cacheKey)) continue;
+          const { data: existing, error: lookupError } = await supabase.from('notifications')
+            .select('id').eq('user_id', uid)
+            .eq('type', 'session_reminder_1h').eq('link_url', link).limit(1);
+          if (lookupError) { console.warn('Reminder lookup failed:', lookupError); continue; }
+          if (existing?.length) { await AsyncStorage.setItem(cacheKey, 'seen'); continue; }
+          const title = session.skill?.title || 'your scheduled skill';
+          const { error: noticeError } = await supabase.from('notifications').insert({
+            user_id: uid, type: 'session_reminder_1h',
+            content: `Your session for "${title}" starts in about 1 hour. Be ready!`,
+            link_url: link,
+          });
+          if (!noticeError) await AsyncStorage.setItem(cacheKey, 'sent');
+          else console.warn('Reminder could not be saved:', noticeError);
+        }
+      } catch (err) { console.warn('Session reminder check failed:', err); }
+      finally { checkingReminders = false; }
+    };
+
     const handleLocalUpdate = () => { if (currentUserId) fetchProfile(currentUserId); };
 
     const init = async () => {
@@ -530,6 +613,8 @@ export default function UserLayout() {
       if (disposed) return;
       if (!user) { resetToLogin(); return; }
       currentUserId = user.id;
+      void checkReminders(user.id);
+      reminderInterval = setInterval(() => { void checkReminders(user.id); }, 60_000);
 
       await fetchProfile(user.id);
       await fetchNotifications(user.id);
@@ -540,7 +625,7 @@ export default function UserLayout() {
 
       // phones go to the background: catch up when the app comes back
       appSub = AppState.addEventListener('change', (st) => {
-        if (st === 'active' && currentUserId) { fetchProfile(currentUserId); fetchNotifications(currentUserId); }
+        if (st === 'active' && currentUserId) { fetchProfile(currentUserId); fetchNotifications(currentUserId); void checkReminders(currentUserId); }
       });
 
       profileChannel = supabase.channel(`profile_rt_${user.id}_${channelSuffix}`)
@@ -579,6 +664,7 @@ export default function UserLayout() {
     return () => {
       disposed = true;
       if (creditSub) creditSub.remove();
+      if (reminderInterval) clearInterval(reminderInterval);
       if (appSub) appSub.remove();
       if (profileChannel) supabase.removeChannel(profileChannel);
       if (notifsChannel) supabase.removeChannel(notifsChannel);
@@ -672,6 +758,7 @@ export default function UserLayout() {
   // let a sheet finish closing before pushing a screen (avoids a flicker on iOS)
   const closeThen = (close, fn) => { close(false); setTimeout(fn, 260); };
 
+  const themedToast = useThemeStyle(s.toast);
   const toastMeta = toastNotification ? getNotificationMeta(toastNotification.type) : null;
   const ToastIcon = toastMeta?.Icon;
   const toastTone = toastMeta ? TONES[toastMeta.tone] : null;
@@ -680,7 +767,8 @@ export default function UserLayout() {
   const tabIcon = (Icon) => ({ color, focused }) => <Icon size={24} color={color} strokeWidth={focused ? 2.3 : 1.8} />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: isDark ? '#0c151b' : '#fff' }}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#0c151b' : '#fff'} />
       <Tab.Navigator
         initialRouteName="Dashboard"
         screenListeners={({ route }) => ({ focus: () => setActiveTab(route.name) })}
@@ -694,17 +782,17 @@ export default function UserLayout() {
               onCredits={() => navigation.navigate('Payments')}
             />
           ),
-          tabBarActiveTintColor: T.brand,
-          tabBarInactiveTintColor: T.sub,
+          tabBarActiveTintColor: isDark ? '#34d399' : T.brand,
+          tabBarInactiveTintColor: isDark ? '#94a3b8' : T.sub,
           tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-          tabBarStyle: { backgroundColor: '#fff', borderTopColor: T.line, borderTopWidth: 1, elevation: 0 },
+          tabBarStyle: { backgroundColor: isDark ? '#162329' : '#fff', borderTopColor: isDark ? '#2b4249' : T.line, borderTopWidth: 1, elevation: 0 },
         }}
       >
-        <Tab.Screen name="Dashboard"   component={UserDashboard} options={{ title: 'Browse',      tabBarIcon: tabIcon(Compass) }} />
-        <Tab.Screen name="Community"   component={Community}     options={{ title: 'Community',   tabBarIcon: tabIcon(Globe) }} />
-        <Tab.Screen name="Sessions"    component={Sessions}      options={{ title: 'Sessions',    tabBarIcon: tabIcon(CalendarDays) }} />
-        <Tab.Screen name="Messages"    component={Messages}      options={{ title: 'Messages',    tabBarIcon: tabIcon(MessageCircle) }} />
-        <Tab.Screen name="Leaderboard" component={Leaderboard}   options={{ title: 'Leaderboard', tabBarIcon: tabIcon(Trophy) }} />
+        <Tab.Screen name="Dashboard"   component={AnimatedDashboard} options={{ title: 'Browse',      tabBarIcon: tabIcon(Compass) }} />
+        <Tab.Screen name="Community"   component={AnimatedCommunity}     options={{ title: 'Community',   tabBarIcon: tabIcon(Globe) }} />
+        <Tab.Screen name="Sessions"    component={AnimatedSessions}      options={{ title: 'Sessions',    tabBarIcon: tabIcon(CalendarDays) }} />
+        <Tab.Screen name="Messages"    component={AnimatedMessages}      options={{ title: 'Messages',    tabBarIcon: tabIcon(MessageCircle) }} />
+        <Tab.Screen name="Leaderboard" component={AnimatedLeaderboard}   options={{ title: 'Leaderboard', tabBarIcon: tabIcon(Trophy) }} />
       </Tab.Navigator>
 
       {/* floating help: only on the Dashboard (Browse) tab */}
@@ -713,7 +801,7 @@ export default function UserLayout() {
       {/* ══ LIVE TOAST: new messages and community activity. Tapping it opens the same target as the bell item. */}
       {toastNotification && toastMeta && ToastIcon && (
         <Animated.View style={[s.toastWrap, { top: insets.top + 56, transform: [{ translateY: toastAnim }] }]} pointerEvents="box-none">
-          <View style={s.toast}>
+          <View style={themedToast}>
             <View style={[s.iconBubble, { backgroundColor: toastTone.bg }]}>
               <ToastIcon size={20} color={toastTone.fg} strokeWidth={1.8} />
             </View>
@@ -755,6 +843,18 @@ export default function UserLayout() {
           </Pressable>
         ))}
 
+        {/* Same regular-user-only local dark preference as Web; no account update. */}
+        <Pressable onPress={toggleDark} accessibilityRole="switch" accessibilityState={{ checked: isDark }}
+          style={({ pressed }) => [s.menuRow, pressed && { backgroundColor: isDark ? '#243940' : T.strip }]}>
+          <View style={[s.menuIcon, { backgroundColor: isDark ? '#123f36' : '#ecfdf5' }]}>
+            {isDark ? <Moon size={19} color="#34d399" /> : <Sun size={19} color="#047857" />}
+          </View>
+          <Text style={s.menuLabel}>Dark Mode</Text>
+          <View style={[s.themeTrack, { backgroundColor: isDark ? '#047857' : '#cbd5e1' }]}>
+            <View style={[s.themeThumb, isDark && { alignSelf: 'flex-end' }]} />
+          </View>
+        </Pressable>
+
         <Pressable onPress={() => { setIsProfileOpen(false); handleLogout(); }} style={({ pressed }) => [s.menuRow, { borderBottomWidth: 0 }, pressed && { backgroundColor: '#fff1f2' }]}>
           <View style={[s.menuIcon, { backgroundColor: T.danger + '1A' }]}><LogOut size={19} color={T.danger} strokeWidth={1.9} /></View>
           <Text style={[s.menuLabel, { color: T.danger }]}>Sign out</Text>
@@ -789,6 +889,8 @@ const s = StyleSheet.create({
   iconBubble: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
 
   // profile menu
+  themeTrack: { width: 38, height: 22, borderRadius: 12, padding: 3, justifyContent: 'center' },
+  themeThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#fff', alignSelf: 'flex-start' },
   menuHead: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: T.line },
   menuName: { fontSize: 16, fontWeight: '700', color: T.text },
   menuSub: { fontSize: 13, color: T.sub, marginTop: 1 },

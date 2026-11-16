@@ -152,7 +152,13 @@ export default function ModDashboard() {
       if (Date.now() - lastFetch.current > 3000) fetchDashboardData(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchDashboardData(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchDashboardData(true);
+    const liveChannel = supabase.channel('mod_moddashboard_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, refreshRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills' }, refreshRealtime)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sessions' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchDashboardData(true); setRefreshing(false); };

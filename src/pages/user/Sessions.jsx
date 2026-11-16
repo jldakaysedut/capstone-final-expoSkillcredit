@@ -1,3 +1,5 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/Sessions.jsx
 //  Same data + logic as before, restyled with the compact X-style typography
@@ -5,18 +7,15 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Alert, RefreshControl, AppState,
-  ActivityIndicator, KeyboardAvoidingView, Platform, DeviceEventEmitter, StyleSheet,
+  Modal, RefreshControl, AppState, Platform, DeviceEventEmitter, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import {
-  ArrowRight, Briefcase, CalendarDays, CheckCircle2, ChevronDown, Heart, MessageCircle,
-  MessageSquare, MoreHorizontal, PenLine, PlayCircle, RefreshCw, Scale, ShieldCheck, Star, Target, X,
-  AlertTriangle,
-} from 'lucide-react-native';
+import { ArrowRight, Briefcase, CalendarDays, CheckCircle2, ChevronDown, Heart, MessageCircle, MessageSquare, MoreHorizontal, PenLine, PlayCircle, RefreshCw, Scale, ShieldCheck, Star, Target, X, AlertTriangle } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
 
 // ─────────────────────────────────────────────────────────────────
 // SESSIONS: "Upcoming State" + Formal Start & Cancelled Chat (V4)
@@ -69,6 +68,13 @@ function getSafeDateObj(dateStr, timeStr) {
   const [year, month, day] = dateStr.split('-').map(Number);
   const [hours, minutes] = timeStr.split(':').map(Number);
   return new Date(year, month - 1, day, hours, minutes);
+}
+
+// The booking RPC validates time in Asia/Manila, regardless of device timezone.
+function isScheduleExpired(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return false;
+  const timestamp = Date.parse(`${dateStr}T${String(timeStr).slice(0, 5)}:00+08:00`);
+  return Number.isFinite(timestamp) && Date.now() > timestamp;
 }
 
 function getGroup(dateStr, timeStr) {
@@ -259,6 +265,14 @@ export default function Sessions() {
     return () => sub.remove();
   }, [currentUserId]);
 
+  // Refresh when navigating back from Messages or session detail views.
+  useEffect(() => {
+    const off = navigation.addListener('focus', () => {
+      if (currentUserId) { fetchSessions(currentUserId); fetchUserReports(currentUserId); }
+    });
+    return off;
+  }, [navigation, currentUserId]);
+
   const onRefresh = async () => { setRefreshing(true); await fetchSessions(currentUserId); await fetchUserReports(currentUserId); setRefreshing(false); };
 
   // deep link: expand + highlight + scroll to the session
@@ -287,11 +301,57 @@ export default function Sessions() {
     setProcessingId(session.id);
     try {
       if (action === 'cancel' || action === 'decline' || action === 'cancel_no_show') {
-        const { data: sd } = await supabase.from('user_profiles').select('credits_balance').eq('id', session.student_id).single();
-        await supabase.from('user_profiles').update({ credits_balance: Number(sd?.credits_balance || 0) + Number(session.credit_amount || 0) }).eq('id', session.student_id);
-        await supabase.from('sessions').update({ status: 'cancelled' }).eq('id', session.id);
+        // Atomic server-side refund and cancellation; prevents split writes and
+        // duplicate credits on retries or repeated taps.
+        const { data: cancellationResult, error: cancellationError } = await supabase.rpc(
+          'skillcredit_secure_cancel_session', { p_session_id: session.id, p_action: action }
+        );
+        if (cancellationError) throw cancellationError;
+        if (cancellationResult?.state === 'already_cancelled') {
+          throw new Error('This booking was already cancelled. Check the learner wallet before taking any further action.');
+        }
+        if (cancellationResult?.state !== 'cancelled' || cancellationResult?.refunded !== true) {
+          throw new Error('Cancellation result could not be verified. Check Sessions before retrying.');
+        }
         DeviceEventEmitter.emit('credit_updated');
 
+        // Notify the other participant only after the existing cancellation update succeeds.
+        // Keep the existing credit refund and no-show behavior unchanged.
+        if (action === 'cancel' || action === 'decline') {
+          const actorIsInstructor = session.instructor_id === currentUserId;
+          const otherId = actorIsInstructor ? session.student_id : session.instructor_id;
+          const actor = actorIsInstructor
+            ? session.instructor?.full_name || 'Your teacher'
+            : session.student?.full_name || 'Your learner';
+          const sessionLabel = session.skill?.title ? ` for "${session.skill.title}"` : '';
+          let noticeContent;
+
+          if (action === 'decline' && session.status === 'pending') {
+            noticeContent = `${actor} declined your booking request${sessionLabel}. The booking has been cancelled. Please check your wallet for the credit refund.`;
+          } else if (action === 'decline') {
+            noticeContent = `${actor} cancelled your booking${sessionLabel} after proposing a new time. Please check your wallet for the credit refund.`;
+          } else if (session.status === 'reschedule_proposed' && !actorIsInstructor) {
+            noticeContent = `${actor} declined the proposed schedule and cancelled the booking${sessionLabel}.`;
+          } else if (session.status === 'upcoming' && actorIsInstructor) {
+            noticeContent = `${actor} cancelled your upcoming session${sessionLabel}. Please check your wallet for the credit refund.`;
+          } else if (session.status === 'upcoming') {
+            noticeContent = `${actor} cancelled the upcoming session${sessionLabel}.`;
+          } else if (session.status === 'pending') {
+            noticeContent = `${actor} cancelled the booking request${sessionLabel}.`;
+          } else {
+            noticeContent = `${actor} cancelled the session${sessionLabel}.`;
+          }
+
+          if (otherId && otherId !== currentUserId) {
+            const { error: noticeError } = await supabase.from('notifications').insert({
+              user_id: otherId,
+              type: 'session_cancelled',
+              content: noticeContent,
+              link_url: `/sessions?session=${session.id}`,
+            });
+            if (noticeError) console.error('Session cancellation notification failed:', noticeError);
+          }
+        }
         if (action === 'cancel_no_show') {
           await supabase.from('notifications').insert([{
             user_id: session.instructor_id,
@@ -301,7 +361,18 @@ export default function Sessions() {
           }]);
         }
       } else if (action === 'accept_schedule') {
-        await supabase.from('sessions').update({ status: 'upcoming' }).eq('id', session.id);
+        // Refetch immediately before status change; stale buttons can outlive
+        // the scheduled time while the app is open.
+        const { data: freshSession, error: freshSessionError } = await supabase.from('sessions')
+          .select('status, scheduled_date, scheduled_time').eq('id', session.id).single();
+        if (freshSessionError || !freshSession) throw freshSessionError || new Error('Session unavailable.');
+        if (!['pending', 'reschedule_proposed'].includes(freshSession.status) ||
+            isScheduleExpired(freshSession.scheduled_date, freshSession.scheduled_time)) {
+          throw new Error('This schedule has expired or changed. Manage the booking for refund options.');
+        }
+        const { error: confirmError } = await supabase.from('sessions').update({ status: 'upcoming' })
+          .eq('id', session.id).eq('status', freshSession.status);
+        if (confirmError) throw confirmError;
 
         const isInstructorAction = session.instructor_id === currentUserId;
         const targetUserId = isInstructorAction ? session.student_id : session.instructor_id;
@@ -328,19 +399,24 @@ export default function Sessions() {
         }]);
       } else if (action === 'mark_done') {
         if (!(await confirmAsync('Mark as done', 'Mark session as done?'))) { setProcessingId(null); return; }
+        // The existing DB RPC atomically confirms both participants and awards credits only once.
+        // Never update instructor credits_balance directly from mobile.
+        const { data: outcome, error: completionError } = await supabase.rpc('confirm_session_completion', {
+          p_session_id: session.id,
+        });
+        if (completionError) throw completionError;
+        if (!outcome || !['waiting', 'completed'].includes(outcome.state)) {
+          throw new Error('Unexpected completion response. Refresh the session before retrying.');
+        }
+
         const isInstructor = session.instructor_id === currentUserId;
-        const payload = isInstructor ? { instructor_completed: true } : { student_completed: true };
-        const otherDone = isInstructor ? session.student_completed : session.instructor_completed;
         const targetUserId = isInstructor ? session.student_id : session.instructor_id;
         const actorName = isInstructor ? session.instructor?.full_name || 'The teacher' : session.student?.full_name || 'The learner';
 
-        if (otherDone) {
-          payload.status = 'completed';
-          const { data: id } = await supabase.from('user_profiles').select('credits_balance').eq('id', session.instructor_id).single();
-          await supabase.from('user_profiles').update({ credits_balance: Number(id?.credits_balance || 0) + Number(session.credit_amount || 0) }).eq('id', session.instructor_id);
+        if (outcome.state === 'completed' && outcome.awarded === true) {
           DeviceEventEmitter.emit('credit_updated');
-
-          await supabase.from('notifications').insert([
+          // Notification delivery is best-effort: the credit award is already committed.
+          const { error: noticeError } = await supabase.from('notifications').insert([
             {
               user_id: session.student_id,
               type: 'session_completed',
@@ -354,22 +430,41 @@ export default function Sessions() {
               link_url: `/sessions?session=${session.id}`,
             },
           ]);
-        } else {
-          await supabase.from('notifications').insert([{
+          if (noticeError) console.error('Completion notification failed (credits were already awarded):', noticeError);
+        } else if (outcome.state === 'waiting' && outcome.new_confirmation === true) {
+          const { error: noticeError } = await supabase.from('notifications').insert([{
             user_id: targetUserId,
             type: 'session_update',
             content: `${actorName} has marked the session as done. Please confirm to finalize the completion.`,
             link_url: `/sessions?session=${session.id}`,
           }]);
+          if (noticeError) console.error('Completion confirmation notification failed:', noticeError);
         }
-        await supabase.from('sessions').update(payload).eq('id', session.id);
       } else if (action === 'undo_done') {
         if (!(await confirmAsync('Undo', "Undo 'Mark as Done'?"))) { setProcessingId(null); return; }
         const isInstructor = session.instructor_id === currentUserId;
-        await supabase.from('sessions').update(isInstructor ? { instructor_completed: false } : { student_completed: false }).eq('id', session.id);
+        const { error: undoError } = await supabase.from('sessions').update(isInstructor ? { instructor_completed: false } : { student_completed: false }).eq('id', session.id);
+        if (!undoError) {
+          const otherId = isInstructor ? session.student_id : session.instructor_id;
+          const actor = isInstructor
+            ? session.instructor?.full_name || 'The teacher'
+            : session.student?.full_name || 'The learner';
+          if (otherId && otherId !== currentUserId) {
+            const { error: noticeError } = await supabase.from('notifications').insert({
+              user_id: otherId,
+              type: 'session_update',
+              content: `${actor} withdrew their completion confirmation. The session now needs confirmation again.`,
+              link_url: `/sessions?session=${session.id}`,
+            });
+            if (noticeError) console.error('Completion undo notification failed:', noticeError);
+          }
+        }
       }
       fetchSessions(currentUserId);
-    } catch (err) { console.error(err.message); Alert.alert('Error', 'Error processing transaction.'); }
+    } catch (err) {
+      console.error('Session action failed:', err);
+      Alert.alert('Session action', err?.message || 'The action could not be verified. Refresh Sessions before retrying.');
+    }
     finally { setProcessingId(null); }
   };
 
@@ -482,7 +577,7 @@ export default function Sessions() {
     const sessionDateObj = getSafeDateObj(session.scheduled_date, session.scheduled_time);
     const durationMs = parseDurationToMs(session.skill?.duration);
     const isSessionFinished = Date.now() > sessionDateObj.getTime() + durationMs;
-    const isExpired = Date.now() > sessionDateObj.getTime();
+    const isExpired = isScheduleExpired(session.scheduled_date, session.scheduled_time);
     const isNoShow = Date.now() > sessionDateObj.getTime() + 30 * 60 * 1000;
 
     const actions = [];
@@ -497,19 +592,30 @@ export default function Sessions() {
     if (st === 'pending') {
       if (isExpired) hint = '⏰ Schedule expired';
       if (isInstructor) {
-        if (!isExpired) add('Confirm schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
-        add('Propose new time', openPropose, isExpired ? 'purple' : 'soft');
-        add('Decline', () => askThenRun('Decline', 'Decline?', session, 'decline', 'Decline'), 'danger');
+        if (isExpired) {
+          add('Return Credit', () => askThenRun('Return Credit', 'Schedule expired. Return credits to the learner and cancel this booking?', session, 'decline', 'Return Credit', false), 'greenSoft', RefreshCw);
+        } else {
+          add('Confirm schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
+          add('Propose new time', openPropose, 'soft');
+          add('Decline', () => askThenRun('Decline', 'Decline?', session, 'decline', 'Decline'), 'danger');
+        }
       } else if (!isExpired) {
         add('Cancel & refund', () => askThenRun('Cancel', 'Cancel?', session, 'cancel', 'Cancel booking'), 'danger');
       } else {
         add('Claim refund', () => askThenRun('Claim refund', 'Session expired. Cancel to refund?', session, 'cancel', 'Refund', false), 'greenSoft', RefreshCw);
       }
     } else if (st === 'reschedule_proposed') {
+      if (isExpired) hint = '⏰ Proposed schedule expired';
       if (isInstructor) {
-        hint = '⏳ Waiting for the learner to confirm the new time';
-        add('Edit proposed time', openPropose, 'purple');
-        add('Decline', () => askThenRun('Decline', 'Cancel booking entirely?', session, 'decline', 'Decline'), 'danger');
+        if (isExpired) {
+          add('Return Credit', () => askThenRun('Return Credit', 'Proposed schedule expired. Return credits to the learner and cancel this booking?', session, 'decline', 'Return Credit', false), 'greenSoft', RefreshCw);
+        } else {
+          hint = '⏳ Waiting for the learner to confirm the new time';
+          add('Edit proposed time', openPropose, 'purple');
+          add('Decline', () => askThenRun('Decline', 'Cancel booking entirely?', session, 'decline', 'Decline'), 'danger');
+        }
+      } else if (isExpired) {
+        add('Claim Refund', () => askThenRun('Claim Refund', 'Proposed schedule expired. Claim your booking credits back?', session, 'cancel', 'Claim Refund', false), 'greenSoft', RefreshCw);
       } else {
         hint = '📅 The teacher proposed a new schedule';
         add('Accept schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
@@ -589,13 +695,7 @@ export default function Sessions() {
     return acc;
   }, {});
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color="#047857" />
-      </View>
-    );
-  }
+  if (loading) return <UserScreenSkeleton type="sessions" />;
 
   const goProfile = (id) => id && navigation.navigate('PublicProfile', { id });
   const goSkill = (id) => navigation.navigate('SkillDetails', { id });
@@ -609,7 +709,7 @@ export default function Sessions() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#047857" colors={['#047857']} />}
       >
         {/* top: role toggle + status chips */}
-        <View style={s.topBlock}>
+        <Reveal delay={90}><View style={s.topBlock}>
           <View style={s.roleToggle}>
             {['All', 'Teaching', 'Learning'].map((role) => (
               <Pressable key={role} onPress={() => setRoleFilter(role)} style={[s.roleBtn, roleFilter === role && s.roleBtnOn]}>
@@ -630,7 +730,7 @@ export default function Sessions() {
               );
             })}
           </ScrollView>
-        </View>
+        </View></Reveal>
 
         {/* cards */}
         {filtered.length === 0 ? (
@@ -711,14 +811,14 @@ export default function Sessions() {
                         {(primary || tag || canMessage) && (
                           <View style={s.actionRow}>
                             {primary ? (
-                              <Pressable
+                              <PressScale
                                 onPress={primary.onPress}
                                 disabled={primary.disabled}
                                 style={[s.mainBtn, { backgroundColor: tone.bg, borderColor: tone.border }, primary.disabled && { opacity: 0.55 }]}
                               >
                                 {primary.Icon && <primary.Icon size={16} color={tone.text} />}
                                 <Text style={{ fontSize: 14, fontWeight: '700', color: tone.text }} numberOfLines={1}>{primary.label}</Text>
-                              </Pressable>
+                              </PressScale>
                             ) : tag ? (
                               <View style={s.tagBox}><Text style={{ fontSize: 13, fontWeight: '600', color: T.sub }}>{tag}</Text></View>
                             ) : <View style={{ flex: 1 }} />}
@@ -942,11 +1042,11 @@ export default function Sessions() {
 
 const s = StyleSheet.create({
   // top
-  topBlock: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 },
-  roleToggle: { flexDirection: 'row', backgroundColor: T.field, borderRadius: 21, padding: 3 },
+  topBlock: { paddingHorizontal: 16, backgroundColor: '#F5FBF7', paddingTop: 18, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#DDEFE3'},
+  roleToggle: { flexDirection: 'row', borderRadius: 16, backgroundColor: '#E1F1E8', padding: 4},
   roleBtn: { flex: 1, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  roleBtnOn: { backgroundColor: '#fff' },
-  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: T.field },
+  roleBtnOn: { borderRadius: 13, backgroundColor: '#FFFFFF', shadowColor:'#0B573C', shadowOpacity:0.07, shadowRadius:5, shadowOffset:{width:0,height:2}, elevation:1},
+  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 34, borderRadius: 15, backgroundColor: '#EAF4ED'},
   tabOn: { backgroundColor: T.text },
 
   empty: { alignItems: 'center', paddingVertical: 56, paddingHorizontal: 24 },
@@ -954,14 +1054,14 @@ const s = StyleSheet.create({
   groupLabel: { fontSize: 13, fontWeight: '600', color: T.sub, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
 
   // session rows (timeline style: avatar left, content aligned at 72px)
-  card: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: T.line },
+  card: { backgroundColor: '#fff', borderBottomWidth: 1, marginHorizontal: 12, marginTop: 10, borderRadius: 20, borderWidth: 1, borderColor: '#E0ECE5', borderBottomColor: '#E0ECE5', shadowColor:'#0B573C', shadowOpacity:0.04, shadowRadius:7, shadowOffset:{width:0,height:2}, elevation:1},
   cardHighlight: { backgroundColor: T.soft },
-  cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingBottom: 8 , paddingTop: 15},
   avatar: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: '#d1fae5', alignItems: 'center', justifyContent: 'center' },
   chip: { fontSize: 12, fontWeight: '600', paddingHorizontal: 9, paddingVertical: 2, borderRadius: 10, overflow: 'hidden' },
   hint: { fontSize: 13, color: T.sub, paddingLeft: 72, paddingRight: 16, paddingBottom: 8 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 72, paddingRight: 16, paddingBottom: 12 },
-  mainBtn: { flex: 1, height: 38, borderRadius: 19, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 },
+  mainBtn: { flex: 1, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 , borderRadius: 14, height: 41},
   tagBox: { flex: 1, height: 38, borderRadius: 19, backgroundColor: T.field, alignItems: 'center', justifyContent: 'center' },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: T.field, alignItems: 'center', justifyContent: 'center' },
   expanded: { paddingLeft: 72, paddingRight: 16, paddingBottom: 12 },
@@ -971,7 +1071,7 @@ const s = StyleSheet.create({
 
   // sheets
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 8, maxHeight: '88%' },
+  sheet: { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 8, maxHeight: '88%' , borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginBottom: 6 },
   sheetTitle: { fontSize: 18, fontWeight: '700', color: T.text, marginTop: 6, marginBottom: 4, letterSpacing: -0.2 },
   moreRow: { height: 48, alignItems: 'center', justifyContent: 'center', borderTopWidth: 1, borderTopColor: T.line },
@@ -984,5 +1084,5 @@ const s = StyleSheet.create({
   selChipText: { fontSize: 13, fontWeight: '600', color: T.text },
   starRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.line },
   dispIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffe4e6', alignItems: 'center', justifyContent: 'center' },
-  grayBox: { backgroundColor: '#f7f9f9', borderWidth: 1, borderColor: T.line, borderRadius: 12, padding: 12, marginBottom: 10 },
+  grayBox: { borderWidth: 1, padding: 12, marginBottom: 10 , backgroundColor: '#F4FAF6', borderRadius: 16, borderColor: '#DAEAE1'},
 });

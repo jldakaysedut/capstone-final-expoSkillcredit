@@ -1,3 +1,5 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/Community.jsx
 //  Same data + logic as before, restyled with the compact X-style typography
@@ -5,17 +7,15 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, TextInput, Image, Pressable, ScrollView, Modal, Alert, RefreshControl,
-  ActivityIndicator, KeyboardAvoidingView, Platform, useWindowDimensions, StyleSheet,
+  Modal, RefreshControl, Platform, useWindowDimensions, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, TextInput, Image, Pressable, ScrollView, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import {
-  ChevronDown, ChevronRight, Heart, ImagePlus, Inbox, MessageSquare, MoreHorizontal,
-  Search, Send, SlidersHorizontal, X,
-} from 'lucide-react-native';
+import { ChevronDown, ChevronRight, Heart, ImagePlus, Inbox, MessageSquare, MoreHorizontal, Search, Send, SlidersHorizontal, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
 
 const MACRO_CATEGORIES = [
   'Tech, Coding & UI/UX', 'Creative, Arts & Media', 'Academics & Languages',
@@ -536,6 +536,8 @@ export default function Community() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [posts, setPosts] = useState([]);
+  // Keep in-flight heart states visible even if a realtime/refresh request finishes.
+  const pendingLikesRef = useRef(new Map());
   const [trendingTags, setTrendingTags] = useState([]);
   const [globalTags, setGlobalTags] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -592,11 +594,20 @@ export default function Community() {
       .order('created_at', { ascending: true });
     const { data: likesData } = await supabase.from('community_post_likes').select('*');
     if (postsData) {
-      const enriched = postsData.map((p) => ({
-        ...p,
-        comments: (commentsData || []).filter((c) => c.post_id === p.id),
-        likes: (likesData || []).filter((l) => l.post_id === p.id),
-      }));
+      const enriched = postsData.map((p) => {
+        const pending = pendingLikesRef.current.get(p.id);
+        const serverLikes = (likesData || []).filter((l) => l.post_id === p.id);
+        const likes = pending
+          ? (pending.shouldBeLiked
+            ? [...serverLikes.filter((l) => l.user_id !== pending.actorId), { id: `optimistic:${pending.actorId}`, post_id: p.id, user_id: pending.actorId }]
+            : serverLikes.filter((l) => l.user_id !== pending.actorId))
+          : serverLikes;
+        return {
+          ...p,
+          comments: (commentsData || []).filter((c) => c.post_id === p.id),
+          likes,
+        };
+      });
       setPosts(enriched);
       setCommentModal((prev) => (prev ? (enriched.find((p) => p.id === prev.id) ?? prev) : null));
       const tc = {};
@@ -862,29 +873,56 @@ export default function Community() {
     await fetchPosts();
   };
 
-  // ─── likes
+  // ─── likes: update the heart immediately, then persist the same Supabase operation.
   const toggleLike = async (postId) => {
     if (checkRestriction()) return;
     const post = posts.find((item) => item.id === postId);
     const actorId = currentUserProfile?.id;
-    if (!post || !actorId) return;
-    const liked = post.likes.some((like) => like.user_id === actorId);
-    if (liked) {
-      const { error } = await supabase.from('community_post_likes').delete().eq('post_id', postId).eq('user_id', actorId);
-      if (error) console.error('Could not unlike community post:', error);
-    } else {
-      const { data: insertedLike, error } = await supabase.from('community_post_likes')
-        .insert([{ post_id: postId, user_id: actorId }]).select('id').single();
-      if (error) console.error('Could not like community post:', error);
-      else if (post.user_id !== actorId) {
-        await createCommunityActivityNotification({
-          recipientId: post.user_id, actorId, type: 'community_like',
-          content: `${currentUserProfile.full_name || 'Someone'} liked your community post.`,
-          linkUrl: buildCommunityActivityLink(postId, null, insertedLike.id),
-        });
+    if (!post || !actorId || pendingLikesRef.current.has(postId)) return;
+
+    const previousLike = post.likes.find((like) => like.user_id === actorId);
+    const shouldBeLiked = !previousLike;
+    pendingLikesRef.current.set(postId, { actorId, shouldBeLiked });
+    const updateOwnLike = (likes, liked, ownLike) => {
+      const others = likes.filter((like) => like.user_id !== actorId);
+      return liked ? [...others, ownLike] : others;
+    };
+    const optimisticLike = { id: `optimistic:${actorId}`, post_id: postId, user_id: actorId };
+    setPosts((prev) => prev.map((item) => item.id === postId
+      ? { ...item, likes: updateOwnLike(item.likes, shouldBeLiked, optimisticLike) } : item));
+    setCommentModal((prev) => prev?.id === postId
+      ? { ...prev, likes: updateOwnLike(prev.likes, shouldBeLiked, optimisticLike) } : prev);
+
+    try {
+      if (!shouldBeLiked) {
+        const { error } = await supabase.from('community_post_likes').delete()
+          .eq('post_id', postId).eq('user_id', actorId);
+        if (error) throw error;
+      } else {
+        const { data: insertedLike, error } = await supabase.from('community_post_likes')
+          .insert([{ post_id: postId, user_id: actorId }]).select('id').single();
+        if (error) throw error;
+        if (post.user_id !== actorId) {
+          await createCommunityActivityNotification({
+            recipientId: post.user_id, actorId, type: 'community_like',
+            content: `${currentUserProfile.full_name || 'Someone'} liked your community post.`,
+            linkUrl: buildCommunityActivityLink(postId, null, insertedLike.id),
+          });
+        }
       }
+      // Keep the original post-refresh behavior to reconcile server-generated IDs/counts.
+      await fetchPosts();
+    } catch (error) {
+      console.error(`Could not ${shouldBeLiked ? 'like' : 'unlike'} community post:`, error);
+      // Roll back only this user's heart; don't discard other users' concurrent likes.
+      setPosts((prev) => prev.map((item) => item.id === postId
+        ? { ...item, likes: updateOwnLike(item.likes, !shouldBeLiked, previousLike) } : item));
+      setCommentModal((prev) => prev?.id === postId
+        ? { ...prev, likes: updateOwnLike(prev.likes, !shouldBeLiked, previousLike) } : prev);
+      Alert.alert('Could not update like', 'Please try again.');
+    } finally {
+      pendingLikesRef.current.delete(postId);
     }
-    await fetchPosts();
   };
 
   // ─── reports
@@ -963,13 +1001,7 @@ export default function Community() {
         ? <Text key={i} onPress={() => setSearchQuery(part)} style={{ fontWeight: '600', color: '#047857' }}>{part}</Text>
         : <Text key={i}>{part}</Text>);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color={T.brand} />
-      </View>
-    );
-  }
+  if (loading) return <UserScreenSkeleton type="community" />;
 
   const hasFilters = !!searchQuery || selectedCategory !== 'All';
   const clearFilters = () => { setSearchQuery(''); setSelectedCategory('All'); setSelectedPostType('All'); };
@@ -985,12 +1017,12 @@ export default function Community() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
       >
         {/* composer + filter + post-type chips */}
-        <View style={s.topBlock}>
+        <Reveal delay={90}><View style={s.topBlock}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Pressable onPress={openCreate} style={s.composerPill}>
+            <PressScale onPress={openCreate} style={s.composerPill}>
               <Text style={s.composerText} numberOfLines={1}>What's on your mind?</Text>
               <ImagePlus size={18} color={T.brand} />
-            </Pressable>
+            </PressScale>
             <Pressable onPress={() => setFilterOpen(true)} style={[s.filterBtn, hasFilters && { backgroundColor: T.soft }]}>
               <SlidersHorizontal size={20} color={hasFilters ? T.brand : T.text} />
             </Pressable>
@@ -1021,7 +1053,7 @@ export default function Community() {
               )}
             </View>
           )}
-        </View>
+        </View></Reveal>
 
         {/* FEED */}
         <View style={{ borderTopWidth: 1, borderTopColor: T.line }} onLayout={(e) => { feedY.current = e.nativeEvent.layout.y; }}>
@@ -1030,9 +1062,9 @@ export default function Community() {
               <Inbox size={40} color={T.border} />
               <Text style={s.emptyTitle}>{posts.length ? 'No posts found' : 'No posts yet'}</Text>
               <Text style={s.emptySub}>{posts.length ? 'Try a different filter.' : 'Be the first to share something.'}</Text>
-              <Pressable onPress={posts.length ? clearFilters : openCreate} style={s.fillBtn}>
+              <PressScale onPress={posts.length ? clearFilters : openCreate} style={s.fillBtn}>
                 <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{posts.length ? 'Clear filters' : 'Create post'}</Text>
-              </Pressable>
+              </PressScale>
             </View>
           ) : filteredPosts.map((post) => {
             const isLiked = post.likes.some((like) => like.user_id === currentUserId);
@@ -1140,9 +1172,9 @@ export default function Community() {
                 </>
               )}
 
-              <Pressable onPress={() => setFilterOpen(false)} style={[s.fillBtn, { marginTop: 22, alignSelf: 'stretch' }]}>
+              <PressScale onPress={() => setFilterOpen(false)} style={[s.fillBtn, { marginTop: 22, alignSelf: 'stretch' }]}>
                 <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>Show {filteredPosts.length} posts</Text>
-              </Pressable>
+              </PressScale>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -1211,11 +1243,11 @@ export default function Community() {
 
 const s = StyleSheet.create({
   // top
-  topBlock: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 },
-  composerPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: 42, backgroundColor: T.field, borderRadius: 21, paddingHorizontal: 16 },
+  topBlock: { paddingHorizontal: 16, backgroundColor: '#F6FBF8', paddingTop: 17, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#D6EDE0'},
+  composerPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16 , height: 49, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DAEDE3', shadowColor: '#064E3B', shadowOpacity: 0.07, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 2},
   composerText: { flex: 1, fontSize: 15, color: T.sub },
-  filterBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: T.field, alignItems: 'center', justifyContent: 'center' },
-  chip: { justifyContent: 'center', paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: T.field },
+  filterBtn: { alignItems: 'center', justifyContent: 'center' , width: 47, height: 47, borderRadius: 16, backgroundColor: '#E5F4EC', borderWidth: 1, borderColor: '#CDEBD9'},
+  chip: { justifyContent: 'center', paddingHorizontal: 14, borderRadius: 16, backgroundColor: '#ECF4EF', height: 35},
   chipOn: { backgroundColor: T.text },
   chipText: { fontSize: 13, fontWeight: '600', color: T.text },
   activeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 12 },
@@ -1223,14 +1255,14 @@ const s = StyleSheet.create({
   activeChipText: { fontSize: 13, fontWeight: '600', color: '#065f46', flexShrink: 1 },
 
   // posts (timeline rows: avatar left, content right)
-  post: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
+  post: { flexDirection: 'row', gap: 12, borderBottomWidth: 1, backgroundColor: '#fff' , marginHorizontal: 11, marginTop: 10, paddingHorizontal: 13, paddingTop: 15, paddingBottom: 9, borderWidth: 1, borderColor: '#E1EDE6', borderBottomColor: '#E1EDE6', borderRadius: 20, shadowColor: '#123D2A', shadowOpacity: 0.035, shadowRadius: 8, shadowOffset: {width: 0, height: 2}, elevation: 1},
   postHighlight: { backgroundColor: T.soft },
   postHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  postName: { flexShrink: 1, fontSize: 15, fontWeight: '700', color: T.text },
+  postName: { flexShrink: 1, fontSize: 15, fontWeight: '700', color: T.text , letterSpacing: -0.2},
   postTime: { fontSize: 13, color: T.sub },
   moreBtn: { marginLeft: 'auto', width: 28, height: 28, marginTop: -4, marginRight: -6, alignItems: 'center', justifyContent: 'center' },
   postType: { fontSize: 13, fontWeight: '600', color: T.brand, marginTop: 1 },
-  postText: { fontSize: 15, lineHeight: 21, color: T.text },
+  postText: { fontSize: 15, color: T.text , lineHeight: 23},
   seeMore: { fontSize: 14, fontWeight: '600', color: T.brand, marginTop: 4 },
   collage: { flexDirection: 'row', gap: 2, borderRadius: 12, overflow: 'hidden', marginTop: 10, borderWidth: 1, borderColor: T.line },
   moreOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,20,25,0.55)', alignItems: 'center', justifyContent: 'center' },
@@ -1242,15 +1274,15 @@ const s = StyleSheet.create({
   empty: { alignItems: 'center', paddingVertical: 56, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: T.text, marginTop: 12 },
   emptySub: { fontSize: 14, color: T.sub, marginTop: 4, textAlign: 'center' },
-  fillBtn: { height: 44, paddingHorizontal: 26, borderRadius: 22, backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  fillBtn: { paddingHorizontal: 26, backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', marginTop: 16 , borderRadius: 15, height: 47},
 
   // sheets
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginTop: 8 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
   sheetTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
-  createSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' },
-  commentSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '88%' },
+  createSheet: { backgroundColor: '#fff', maxHeight: '92%' , borderTopLeftRadius: 28, borderTopRightRadius: 28},
+  commentSheet: { backgroundColor: '#fff', height: '88%' , borderTopLeftRadius: 28, borderTopRightRadius: 28},
   filterSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%' },
   reportSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: T.sub, marginBottom: 10 },

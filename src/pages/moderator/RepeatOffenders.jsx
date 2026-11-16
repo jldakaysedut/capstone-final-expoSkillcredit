@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/RepeatOffenders.jsx
 //  Same logic as the new web version: accounts with 3+ strikes merged with the
@@ -10,7 +11,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, FlatList, ScrollView, TextInput, Modal, Alert, RefreshControl, AppState,
+  View, Text, Image, Pressable, FlatList, ScrollView, TextInput, Modal, RefreshControl, AppState,
   KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -86,7 +87,12 @@ export default function RepeatOffenders() {
       if (Date.now() - lastFetch.current > 3000) fetchOffenders(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchOffenders(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchOffenders(true);
+    const liveChannel = supabase.channel('mod_repeatoffenders_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repeat_offenders' }, refreshRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchOffenders(true); setRefreshing(false); };

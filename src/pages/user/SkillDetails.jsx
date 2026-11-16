@@ -1,3 +1,4 @@
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/SkillDetails.jsx
 //  Same data + booking rules as the web. Compact X-style typography
@@ -7,16 +8,15 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Modal, Linking, RefreshControl, AppState,
-  ActivityIndicator, KeyboardAvoidingView, Platform, DeviceEventEmitter, StyleSheet,
+  Modal, Linking, RefreshControl, AppState, Platform, DeviceEventEmitter, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import {
-  ArrowLeft, CheckCircle2, ChevronRight, Clock, ExternalLink, Mail, Search, Star, X,
-} from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, ChevronRight, Clock, ExternalLink, Mail, Search, Star, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
 
 const T = {
   text: '#0f1419', sub: '#536471', line: '#eff3f4', border: '#cfd9de', field: '#eff3f4',
@@ -220,58 +220,67 @@ export default function SkillDetails() {
     }
 
     try {
-      const { data: newSession, error: sessionError } = await supabase.from('sessions')
-        .insert([{
-          skill_id: skill.id,
-          student_id: currentUserId,
-          instructor_id: skill.instructor_id,
-          credit_amount: skill.credit_cost,
-          scheduled_date: preferredDate,
-          scheduled_time: preferredTime,
-          message: bookingMessage.trim(),
-          status: 'pending',
-        }])
-        .select()
-        .single();
-      if (sessionError) throw sessionError;
+      // Server checks availability/price, atomically debits the learner and creates
+      // the booking. Never write credits_balance from this screen after success.
+      const { data: bookedRows, error: bookingError } = await supabase.rpc(
+        'skillcredit_secure_book_session', {
+          p_skill_id: skill.id,
+          p_scheduled_date: preferredDate,
+          p_scheduled_time: preferredTime,
+          p_message: bookingMessage.trim(),
+        }
+      );
+      if (bookingError) throw bookingError;
+      const booked = Array.isArray(bookedRows) ? bookedRows[0] : bookedRows;
+      if (!booked?.session_id || !Number.isInteger(booked?.remaining_credits)) {
+        throw new Error('Booking response could not be verified. Check Sessions before trying again to prevent duplicate bookings.');
+      }
+      const newSession = { id: booked.session_id };
+      const newBalance = booked.remaining_credits;
+      const bookedCost = booked.credit_amount;
+      // The financial transaction is finished at this point. Chat/notification
+      // failures must not turn it into an apparent failed booking.
+      DeviceEventEmitter.emit('credit_updated');
+      setCurrentUserCredits(newBalance);
+      setExistingSession({ id: newSession.id, status: 'pending' });
+      setBookedSessionId(newSession.id);
+      setBookingSuccess(true);
 
       const bookingSysContent = `__BOOKING_REQUEST__::${JSON.stringify({
         skill_id: skill.id,
         title: skill.title,
         image: skill.cover_image_url || null,
-        cost: skill.credit_cost,
+        cost: bookedCost,
         date: preferredDate,
         time: preferredTime,
         userMsg: bookingMessage.trim(),
       })}`;
 
-      const { error: msgError } = await supabase.from('messages').insert([{
-        session_id: newSession.id,
-        sender_id: currentUserId,
-        receiver_id: skill.instructor_id,
-        content: bookingSysContent,
-        is_deleted: false,
-      }]);
-      if (msgError) console.error('Failed to save initial message:', msgError);
+      // Non-financial side effects: report their failures, but never retry the
+      // successful booking RPC because of a failed message or notification.
+      try {
+        const { error: msgError } = await supabase.from('messages').insert([{
+          session_id: newSession.id,
+          sender_id: currentUserId,
+          receiver_id: skill.instructor_id,
+          content: bookingSysContent,
+          is_deleted: false,
+        }]);
+        if (msgError) console.warn('Failed to save initial booking message:', msgError);
+      } catch (msgError) { console.warn('Failed to save initial booking message:', msgError); }
 
-      // link carries the session id so the notification opens this exact booking
-      await supabase.from('notifications').insert([{
-        user_id: skill.instructor_id, type: 'booking',
-        content: `New booking request for "${skill.title}" worth ${skill.credit_cost} CR.`,
-        link_url: `/sessions?session=${newSession.id}`,
-      }]);
-
-      const newBalance = latestBalance - skill.credit_cost;
-      const { error: profileError } = await supabase.from('user_profiles').update({ credits_balance: newBalance }).eq('id', currentUserId);
-      if (profileError) throw profileError;
-
-      DeviceEventEmitter.emit('credit_updated');
-      setCurrentUserCredits(newBalance);
-      setBookedSessionId(newSession.id);
-      setBookingSuccess(true);
+      try {
+        const { error: notificationError } = await supabase.from('notifications').insert([{
+          user_id: skill.instructor_id,
+          type: 'booking',
+          content: `New booking request for "${skill.title}" worth ${bookedCost} CR.`,
+          link_url: `/sessions?session=${newSession.id}`,
+        }]);
+        if (notificationError) console.warn('Failed to save booking notification:', notificationError);
+      } catch (noticeError) { console.warn('Failed to save booking notification:', noticeError); }
     } catch (error) {
       console.error(error);
-      setBookingError('Something went wrong while booking. Please try again.');
+      setBookingError(error?.message || 'Booking could not be completed. Check Sessions before trying again.');
     } finally { setBookingLoading(false); }
   };
 
@@ -297,7 +306,7 @@ export default function SkillDetails() {
     return (
       <View style={{ flex: 1, backgroundColor: '#fff' }}>
         {BackBar}
-        <View style={s.center}><ActivityIndicator size="large" color={T.brand} /></View>
+        <UserScreenSkeleton type="skillDetails" />
       </View>
     );
   }
@@ -358,7 +367,7 @@ export default function SkillDetails() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: '#f4f8f6' }}>
       {BackBar}
 
       <ScrollView
@@ -366,10 +375,15 @@ export default function SkillDetails() {
         contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
       >
-        {!!skill.cover_image_url && <Image source={{ uri: skill.cover_image_url }} style={s.cover} resizeMode="cover" />}
+        <Reveal>
+          {!!skill.cover_image_url && (
+            <View style={s.coverFrame}>
+              <Image source={{ uri: skill.cover_image_url }} style={s.cover} resizeMode="cover" />
+            </View>
+          )}
 
         {/* title + one meta line + rating */}
-        <View style={s.block}>
+        <View style={[s.block, s.heroInfo]}>
           <Text style={s.title}>{skill.title}</Text>
           {!!meta && <Text style={s.metaLine}>{meta}</Text>}
           <View style={s.ratingRow}>
@@ -384,6 +398,7 @@ export default function SkillDetails() {
             )}
           </View>
         </View>
+        </Reveal>
 
         {/* instructor */}
         <View style={s.block}>
@@ -460,13 +475,13 @@ export default function SkillDetails() {
           <Text style={s.barPrice}>{skill.credit_cost} CR</Text>
           <Text style={[s.barNote, note.danger && { color: T.danger }]} numberOfLines={2}>{note.text}</Text>
         </View>
-        <Pressable
+        <PressScale
           onPress={cta.onPress}
           disabled={cta.disabled}
           style={[s.cta, cta.tone === 'primary' && { backgroundColor: T.brand }, cta.tone === 'soft' && { backgroundColor: T.field }, cta.tone === 'off' && { backgroundColor: T.field, opacity: 0.7 }]}
         >
           <Text style={[s.ctaText, cta.tone !== 'primary' && { color: cta.tone === 'off' ? T.sub : T.text }]}>{cta.label}</Text>
-        </Pressable>
+        </PressScale>
       </View>
 
       {/* ── BOOKING SHEET */}
@@ -565,17 +580,19 @@ const s = StyleSheet.create({
   headBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headTitle: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
 
-  // content
-  cover: { width: '100%', height: 210, backgroundColor: T.field },
-  block: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: T.line },
-  title: { fontSize: 20, fontWeight: '700', color: T.text, lineHeight: 26, letterSpacing: -0.3 },
-  metaLine: { fontSize: 13, color: T.sub },
+  // rounded hero + editorial content cards
+  coverFrame: { marginHorizontal: 14, marginTop: 14, borderRadius: 24, overflow: 'hidden', backgroundColor: '#d1fae5', borderWidth: 1, borderColor: '#dbece2' },
+  cover: { width: '100%', height: 220, backgroundColor: '#e2f3e9' },
+  block: { paddingHorizontal: 17, paddingVertical: 18, marginHorizontal: 14, marginTop: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2ece5', borderRadius: 20 },
+  heroInfo: { marginTop: 12, borderColor: '#d9ebe0', shadowColor: '#064e3b', shadowOpacity: 0.05, shadowRadius: 8, elevation: 1 },
+  title: { fontSize: 23, fontWeight: '800', color: '#153d2e', lineHeight: 29, letterSpacing: -0.6 },
+  metaLine: { fontSize: 13, color: '#647c70', lineHeight: 18 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
   ratingNum: { fontSize: 13, fontWeight: '700', color: T.text },
   newTag: { fontSize: 13, fontWeight: '700', color: T.brand },
   name: { fontSize: 15, fontWeight: '700', color: T.text },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2, marginBottom: 8 },
-  bodyText: { fontSize: 15, lineHeight: 21, color: T.text },
+  sectionTitle: { fontSize: 17, fontWeight: '800', color: '#153d2e', letterSpacing: -0.35, marginBottom: 9 },
+  bodyText: { fontSize: 15, lineHeight: 23, color: '#304d40' },
   seeMore: { fontSize: 14, fontWeight: '600', color: T.brand, marginTop: 6 },
   instructorRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
@@ -587,11 +604,11 @@ const s = StyleSheet.create({
   // sticky bar
   bar: {
     position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 10, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: T.line,
+    paddingHorizontal: 16, paddingTop: 13, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e1ebe4', elevation: 10, shadowColor: '#064e3b', shadowOpacity: 0.10, shadowRadius: 16, shadowOffset: { width: 0, height: -5 },
   },
-  barPrice: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
+  barPrice: { fontSize: 20, fontWeight: '800', color: '#153d2e', letterSpacing: -0.45 },
   barNote: { fontSize: 13, color: T.sub, marginTop: 1 },
-  cta: { height: 44, minWidth: 130, paddingHorizontal: 22, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  cta: { height: 48, minWidth: 130, paddingHorizontal: 22, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#047857', shadowOpacity: 0.12, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   ctaText: { fontSize: 15, fontWeight: '700', color: '#fff' },
 
   // empty

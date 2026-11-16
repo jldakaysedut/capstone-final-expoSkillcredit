@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/user/UserDashboard.jsx
 //  Mobile version (same data + logic as the web dashboard), compact X-style typography.
@@ -5,37 +6,34 @@
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, Image, Pressable, ScrollView, FlatList, Modal, RefreshControl,
-  Alert, AppState, StyleSheet,
+  Modal, RefreshControl, AppState, StyleSheet
 } from 'react-native';
+import { View, Text, TextInput, Image, Pressable, ScrollView, FlatList } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import {
-  ChefHat, Leaf, Hammer, Dumbbell, Scissors, Gamepad2, Wrench, BookOpen, PenLine,
-  MessageCircle, Music2, Palette, Film, Briefcase, PiggyBank, Monitor, Code2, Globe,
-  Bookmark, BookmarkCheck, Star, TrendingUp, TrendingDown, Flame, Sparkles, Trophy, Clock,
-  Search, X, CalendarDays, Check, ChevronLeft, ChevronRight, Pin, SlidersHorizontal, Lightbulb, Plus, PartyPopper,
-} from 'lucide-react-native';
+import { ChefHat, Leaf, Hammer, Dumbbell, Scissors, Wrench, BookOpen, PenLine, MessageCircle, Music2, Palette, Film, Briefcase, PiggyBank, Monitor, Code2, Globe, Bookmark, BookmarkCheck, Star, TrendingUp, TrendingDown, Flame, Sparkles, Trophy, Clock, Search, X, CalendarDays, Check, ChevronLeft, ChevronRight, Pin, SlidersHorizontal, Lightbulb, Plus, PartyPopper } from '../../components/premium/PremiumThemeIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../../supabaseClient';
+import DailyRewardModal from '../../components/DailyRewardModal';
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { useUserTheme } from '../../components/premium/PremiumTheme';
 
 const CATEGORIES = [
   { name: 'Cooking & Baking',      icon: ChefHat,       color: '#f97316' },
-  { name: 'Gardening & Farming',   icon: Leaf,          color: '#22c55e' },
-  { name: 'Home & DIY',            icon: Hammer,        color: '#ca8a04' },
-  { name: 'Health & Fitness',      icon: Dumbbell,      color: '#ef4444' },
-  { name: 'Beauty & Grooming',     icon: Scissors,      color: '#ec4899' },
-  { name: 'Gaming & Hobbies',      icon: Gamepad2,      color: '#8b5cf6' },
-  { name: 'Electronics & Repair',  icon: Wrench,        color: '#3b82f6' },
-  { name: 'School & Tutoring',     icon: BookOpen,      color: '#6366f1' },
-  { name: 'Writing & Content',     icon: PenLine,       color: '#14b8a6' },
-  { name: 'Languages & Speaking',  icon: MessageCircle, color: '#06b6d4' },
-  { name: 'Singing & Instruments', icon: Music2,        color: '#d946ef' },
-  { name: 'Art & Graphic Design',  icon: Palette,       color: '#f43f5e' },
-  { name: 'Video & Animation',     icon: Film,          color: '#f59e0b' },
-  { name: 'Business & Freelance',  icon: Briefcase,     color: '#475569' },
-  { name: 'Financial Literacy',    icon: PiggyBank,     color: '#059669' },
-  { name: 'UI/UX Design',          icon: Monitor,       color: '#0ea5e9' },
-  { name: 'Coding & Tech',         icon: Code2,         color: '#65a30d' },
+  { name: 'Gardening & Plant Care',   icon: Leaf,          color: '#22c55e' },
+  { name: 'Home Repair & DIY',            icon: Hammer,        color: '#ca8a04' },
+  { name: 'Fitness & Sports',      icon: Dumbbell,      color: '#ef4444' },
+  { name: 'Beauty & Personal Care',     icon: Scissors,      color: '#ec4899' },
+  { name: 'Computer, Phone & Electronics Help',  icon: Wrench,        color: '#3b82f6' },
+  { name: 'School Subjects & Tutoring',     icon: BookOpen,      color: '#6366f1' },
+  { name: 'Writing & Editing',     icon: PenLine,       color: '#14b8a6' },
+  { name: 'Languages & Public Speaking',  icon: MessageCircle, color: '#06b6d4' },
+  { name: 'Music & Singing', icon: Music2,        color: '#d946ef' },
+  { name: 'Graphic Design & Digital Art',  icon: Palette,       color: '#f43f5e' },
+  { name: 'Video, Animation & AI Content Creation',     icon: Film,          color: '#f59e0b' },
+  { name: 'Business, Entrepreneurship & Marketing',  icon: Briefcase,     color: '#475569' },
+  { name: 'Finance, Investing & Trading',    icon: PiggyBank,     color: '#059669' },
+  { name: 'Website & App Design',          icon: Monitor,       color: '#0ea5e9' },
+  { name: 'Coding & Programming',         icon: Code2,         color: '#65a30d' },
 ];
 
 const SORT_OPTIONS = [
@@ -82,8 +80,9 @@ function ByLine({ skill }) {
 
 // ── compact card used in the horizontal lanes (no box: image + text, like a feed item)
 function SkillCard({ skill, isSaved, onSave, onView }) {
+  const { isDark } = useUserTheme();
   return (
-    <Pressable onPress={() => onView(skill.id)} style={s.card}>
+    <PressScale onPress={() => onView(skill.id)} style={[s.card, isDark && darkSurfaces.skillCard]}>
       <View style={s.cover}>
         {skill.cover_image_url ? (
           <Image source={{ uri: skill.cover_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
@@ -94,10 +93,12 @@ function SkillCard({ skill, isSaved, onSave, onView }) {
           {isSaved ? <BookmarkCheck size={16} color="#059669" /> : <Bookmark size={16} color="#0f1419" />}
         </Pressable>
       </View>
-      <Text style={s.cardTitle} numberOfLines={2}>{skill.title}</Text>
-      <ByLine skill={skill} />
-      <Text style={s.price}>{skill.credit_cost} CR/hr</Text>
-    </Pressable>
+      <View style={s.cardBody}>
+        <Text style={s.cardTitle} numberOfLines={2}>{skill.title}</Text>
+        <ByLine skill={skill} />
+        <Text style={s.price}>{skill.credit_cost} CR/hr</Text>
+      </View>
+    </PressScale>
   );
 }
 
@@ -134,11 +135,12 @@ function SkillRow({ skill, isSaved, onSave, onView }) {
 
 // ── horizontal lane (max 10 cards, "See all" opens the full list)
 function Lane({ icon: Icon, iconColor, title, skills, loading, savedSkills, onSave, onView, onSeeAll, last }) {
+  const { isDark } = useUserTheme();
   if (!loading && skills.length === 0) return null;
   return (
-    <View style={[s.lane, last && { borderBottomWidth: 0, marginBottom: 0 }]}>
+    <View style={[s.lane, isDark && darkSurfaces.skillLane, last && { borderBottomWidth: 0, marginBottom: 0 }]}>
       <View style={s.laneHead}>
-        <Icon size={18} color={iconColor} />
+        <View style={s.laneIcon}><Icon size={17} color={iconColor} /></View>
         <Text style={s.laneTitle} numberOfLines={1}>{title}</Text>
         {!!onSeeAll && !loading && (
           <Pressable onPress={onSeeAll} style={s.seeAllBtn} hitSlop={8}>
@@ -162,11 +164,12 @@ function Lane({ icon: Icon, iconColor, title, skills, loading, savedSkills, onSa
 }
 
 function Chip({ label, Icon, iconColor, active, onPress }) {
+  const { isDark } = useUserTheme();
   return (
-    <Pressable onPress={onPress} style={[s.chip, active && s.chipOn]}>
+    <PressScale onPress={onPress} style={[s.chip, isDark && !active && darkSurfaces.categoryChip, active && s.chipOn]}>
       {Icon && <Icon size={15} color={active ? '#fff' : iconColor || '#536471'} />}
       <Text style={[s.chipText, active && { color: '#fff' }]}>{label}</Text>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -187,6 +190,7 @@ export default function UserDashboard() {
   const [sortOpen, setSortOpen] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const debounceRef = useRef(null);
+  const pendingSavesRef = useRef(new Map());
 
   // ── backend logic: same queries as before
   const fetchSkills = async () => {
@@ -215,7 +219,15 @@ export default function UserDashboard() {
 
   const fetchSaved = async (uid) => {
     const { data } = await supabase.from('saved_skills').select('skill_id').eq('user_id', uid);
-    if (data) setSavedSkills(data.map((r) => r.skill_id));
+    if (data) {
+      const serverSaved = new Set(data.map((r) => r.skill_id));
+      // Don't overwrite immediate bookmark feedback during a background refresh.
+      pendingSavesRef.current.forEach((shouldSave, id) => {
+        if (shouldSave) serverSaved.add(id);
+        else serverSaved.delete(id);
+      });
+      setSavedSkills([...serverSaved]);
+    }
   };
 
   const fetchProfile = async (uid) => {
@@ -258,12 +270,23 @@ export default function UserDashboard() {
 
   const toggleSave = async (skillId) => {
     if (!currentUser) { Alert.alert('Please log in to save skills.'); return; }
+    if (pendingSavesRef.current.has(skillId)) return;
     const already = savedSkills.includes(skillId);
+    pendingSavesRef.current.set(skillId, !already);
     setSavedSkills((p) => (already ? p.filter((id) => id !== skillId) : [...p, skillId]));
-    if (already) {
-      await supabase.from('saved_skills').delete().match({ user_id: currentUser.id, skill_id: skillId });
-    } else {
-      await supabase.from('saved_skills').insert({ user_id: currentUser.id, skill_id: skillId });
+    try {
+      const { error } = already
+        ? await supabase.from('saved_skills').delete().match({ user_id: currentUser.id, skill_id: skillId })
+        : await supabase.from('saved_skills').insert({ user_id: currentUser.id, skill_id: skillId });
+      if (error) throw error;
+    } catch (error) {
+      console.error('Could not update saved skill:', error);
+      setSavedSkills((p) => already
+        ? (p.includes(skillId) ? p : [...p, skillId])
+        : p.filter((id) => id !== skillId));
+      Alert.alert('Could not update saved skill', 'Please try again.');
+    } finally {
+      pendingSavesRef.current.delete(skillId);
     }
   };
 
@@ -321,15 +344,24 @@ export default function UserDashboard() {
   const visibleSortOptions = SORT_OPTIONS.filter((o) => !o.internal || o.value === sortBy);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: '#f4f8f6' }}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: 140 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#047857" colors={['#047857']} />}
       >
+        {/* A visual-only welcome hero; existing search and discovery controls remain unchanged. */}
+        <Reveal style={s.discoverHero}>
+          <View pointerEvents="none" style={s.heroCircle} />
+          <View pointerEvents="none" style={s.heroRing} />
+          <View style={s.heroKicker}><Sparkles size={13} color="#bbf7d0" /><Text style={s.heroKickerText}>YOUR LEARNING SPACE</Text></View>
+          <Text style={s.heroTitle}>Discover your{`\n`}next skill.</Text>
+          <Text style={s.heroSubtitle}>New ideas, real instructors, endless possibilities.</Text>
+        </Reveal>
         {/* search + sort + category chips (all categories stay here) */}
-        <View style={s.topBlock}>
+        <Reveal style={s.searchShell} delay={80}>
+          <View style={s.topBlock}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <View style={s.search}>
               <Search size={18} color="#536471" />
@@ -367,7 +399,8 @@ export default function UserDashboard() {
               />
             ))}
           </ScrollView>
-        </View>
+          </View>
+        </Reveal>
 
         {/* HOME: lanes end at New arrivals */}
         {!isFiltered && (
@@ -444,6 +477,9 @@ export default function UserDashboard() {
         )}
       </ScrollView>
 
+      {/* Welcome bonus keeps priority; the daily RPC is a separate once-per-day claim. */}
+      <DailyRewardModal userId={currentUser?.id} blocked={showWelcomeModal} onClaimed={load} />
+
       {/* WELCOME BONUS */}
       <Modal visible={showWelcomeModal} transparent animationType="fade" onRequestClose={closeWelcomeModal}>
         <View style={s.welcomeWrap}>
@@ -489,30 +525,48 @@ export default function UserDashboard() {
   );
 }
 
+// Only visually override these three surfaces in dark mode. No query, filter,
+// navigation, bookmark or press handler changes.
+const darkSurfaces = StyleSheet.create({
+  skillCard: { backgroundColor: '#182a31', borderColor: '#2b4249' },
+  skillLane: { backgroundColor: '#122027', borderColor: '#294047' },
+  categoryChip: { backgroundColor: '#1b3034', borderColor: '#365049' },
+});
+
 const s = StyleSheet.create({
-  // top
-  topBlock: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 },
-  search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#eff3f4', borderRadius: 22, paddingHorizontal: 14, height: 42 },
+  // cinematic emerald header + floating functional search panel
+  discoverHero: { backgroundColor: '#064e3b', paddingHorizontal: 22, paddingTop: 30, paddingBottom: 41, overflow: 'hidden', minHeight: 190 },
+  heroCircle: { width: 235, height: 235, borderRadius: 118, backgroundColor: 'rgba(52,211,153,0.14)', position: 'absolute', right: -96, top: -75 },
+  heroRing: { width: 147, height: 147, borderRadius: 74, borderWidth: 2, borderColor: 'rgba(167,243,208,0.16)', position: 'absolute', right: -25, bottom: -66 },
+  heroKicker: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 13 },
+  heroKickerText: { fontSize: 10, fontWeight: '800', letterSpacing: 2, color: '#a7f3d0' },
+  heroTitle: { fontSize: 29, lineHeight: 33, fontWeight: '800', color: '#fff', letterSpacing: -0.85 },
+  heroSubtitle: { marginTop: 10, color: '#d1fae5', fontSize: 12.5, lineHeight: 19, maxWidth: 278 },
+  searchShell: { marginHorizontal: 12, marginTop: -19, zIndex: 2 },
+  topBlock: { backgroundColor: '#fff', paddingHorizontal: 13, paddingTop: 14, paddingBottom: 13, borderRadius: 21, borderWidth: 1, borderColor: '#e6eee9', shadowColor: '#064e3b', shadowOpacity: 0.09, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
+  search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#f1f6f3', borderRadius: 16, paddingHorizontal: 14, height: 44 },
   searchInput: { flex: 1, fontSize: 15, color: '#0f1419', paddingVertical: 0 },
-  sortBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#eff3f4', alignItems: 'center', justifyContent: 'center' },
-  createBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center' },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: '#eff3f4' },
-  chipOn: { backgroundColor: '#0f1419' },
-  chipText: { fontSize: 13, fontWeight: '600', color: '#0f1419' },
+  sortBtn: { width: 44, height: 44, borderRadius: 15, backgroundColor: '#f1f6f3', alignItems: 'center', justifyContent: 'center' },
+  createBtn: { width: 44, height: 44, borderRadius: 15, backgroundColor: '#047857', alignItems: 'center', justifyContent: 'center', elevation: 2 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 36, borderRadius: 12, backgroundColor: '#f1f6f3', borderWidth: 1, borderColor: '#e7efe9' },
+  chipOn: { backgroundColor: '#047857', borderColor: '#047857' },
+  chipText: { fontSize: 12.5, fontWeight: '700', color: '#315547' },
 
   // lanes
-  lane: { paddingTop: 14, paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#eff3f4' },
-  laneHead: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 16, marginBottom: 12 },
-  laneTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: '#0f1419', letterSpacing: -0.2 },
+  lane: { backgroundColor: '#ffffff', marginHorizontal: 12, marginTop: 14, paddingTop: 16, paddingBottom: 18, borderRadius: 22, borderWidth: 1, borderColor: '#e5eee8', shadowColor: '#064e3b', shadowOpacity: 0.04, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 1 },
+  laneHead: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 16, marginBottom: 12 },
+  laneIcon: { width: 30, height: 30, backgroundColor: '#f1f7f3', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  laneTitle: { flex: 1, fontSize: 17, fontWeight: '800', color: '#143d2e', letterSpacing: -0.35 },
   seeAllBtn: { flexDirection: 'row', alignItems: 'center' },
   seeAll: { fontSize: 14, fontWeight: '600', color: '#047857' },
 
   // card (image + text, no box)
-  card: { width: 172 },
-  cover: { height: 106, borderRadius: 12, backgroundColor: '#065f46', overflow: 'hidden' },
+  card: { width: 172, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e8f0ea', borderRadius: 17, paddingBottom: 12, overflow: 'hidden' },
+  cover: { height: 110, borderTopLeftRadius: 16, borderTopRightRadius: 16, backgroundColor: '#0b6047', overflow: 'hidden' },
   coverEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   saveBtn: { position: 'absolute', top: 7, right: 7, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.92)', alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 14, fontWeight: '600', color: '#0f1419', lineHeight: 19, marginTop: 8, marginBottom: 3 },
+  cardBody: { paddingHorizontal: 10 },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: '#163b2d', lineHeight: 19, marginTop: 10, marginBottom: 5 },
   skel: { height: 12, backgroundColor: '#eff3f4', borderRadius: 6 },
 
   // by-line + price
@@ -522,11 +576,11 @@ const s = StyleSheet.create({
   byNew: { fontSize: 13, fontWeight: '600', color: '#059669' },
   byRating: { fontSize: 13, fontWeight: '600', color: '#0f1419' },
   byCount: { fontSize: 13, color: '#536471' },
-  price: { fontSize: 13, fontWeight: '700', color: '#047857', marginTop: 5 },
+  price: { fontSize: 13, fontWeight: '800', color: '#047857', marginTop: 7 },
 
   // rows
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eff3f4' },
-  thumb: { width: 68, height: 68, borderRadius: 12, backgroundColor: '#065f46', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 12, marginHorizontal: 12, marginTop: 9, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e4eee8', borderRadius: 18 },
+  thumb: { width: 70, height: 70, borderRadius: 13, backgroundColor: '#065f46', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   rowTitle: { fontSize: 15, fontWeight: '600', color: '#0f1419', lineHeight: 20, marginBottom: 2 },
   rowSave: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
@@ -543,7 +597,7 @@ const s = StyleSheet.create({
 
   // welcome bonus
   welcomeWrap: { flex: 1, backgroundColor: 'rgba(15,20,25,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  welcomeCard: { width: '100%', maxWidth: 340, backgroundColor: '#fff', borderRadius: 20, paddingHorizontal: 22, paddingTop: 28, paddingBottom: 20, alignItems: 'center' },
+  welcomeCard: { width: '100%', maxWidth: 340, backgroundColor: '#fff', borderRadius: 28, paddingHorizontal: 22, paddingTop: 28, paddingBottom: 20, alignItems: 'center' },
   welcomeClose: { position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   welcomeIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#fffbeb', alignItems: 'center', justifyContent: 'center' },
   welcomeTag: { fontSize: 13, fontWeight: '600', color: '#b45309', marginTop: 14 },

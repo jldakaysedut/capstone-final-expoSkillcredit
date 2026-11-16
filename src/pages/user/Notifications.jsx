@@ -1,13 +1,13 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { useUserTheme } from '../../components/premium/PremiumTheme';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
-  View, Text, Pressable, ScrollView, Modal, RefreshControl, Animated, AppState, StyleSheet,
+  Modal, RefreshControl, Animated, AppState, StyleSheet
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { View, Text, Pressable, ScrollView } from '../../components/premium/PremiumThemePrimitives';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  AlertTriangle, Bell, CalendarDays, CheckCheck, Globe, MessageCircle, Rocket, Scale, ShieldAlert,
-  ShieldCheck, Star, Ticket, X, Shield, Coins, PlayCircle,
-} from 'lucide-react-native';
+import { AlertTriangle, Bell, CalendarDays, CheckCheck, Globe, MessageCircle, Rocket, Scale, ShieldAlert, ShieldCheck, Star, Ticket, X, Shield, Coins, PlayCircle } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // Compact X-style layout: hairline rows, 13px labels, 15px message text, bottom sheet for notices
@@ -62,6 +62,7 @@ const TYPE_META = {
   community_reply:     { tone: 'indigo',  icon: Globe,         label: 'Community Reply', category: 'Community' },
   system:              { tone: 'purple',  icon: Rocket,        label: 'System',          category: 'System' },
   system_alert:        { tone: 'amber',   icon: Coins,         label: 'Balance Update',  category: 'System' },
+  daily_reward:        { tone: 'amber',   icon: Coins,         label: 'Daily Reward',    category: 'System' },
 
   // ── Session updates (mapped to the "Booking" category) ──
   booking_accepted:    { tone: 'indigo',  icon: CalendarDays,  label: 'Schedule Set',    category: 'Booking' },
@@ -69,6 +70,7 @@ const TYPE_META = {
   session_update:      { tone: 'blue',    icon: CheckCheck,    label: 'Session Update',  category: 'Booking' },
   session_completed:   { tone: 'emerald', icon: CheckCheck,    label: 'Completed',       category: 'Booking' },
   session_cancelled:   { tone: 'gray',    icon: X,             label: 'Cancelled',       category: 'Booking' },
+  session_reminder_1h:{ tone: 'emerald', icon: CalendarDays,  label: 'Session Reminder',category: 'Booking' },
   new_rating:          { tone: 'amber',   icon: Star,          label: 'New Rating',      category: 'Review' },
 };
 
@@ -83,6 +85,7 @@ const NOTICE_STYLES = {
   system:              { Icon: Shield, tone: 'indigo', badge: 'System Role Update', title: 'System Admin Notice', notesLabel: 'Administrator Remarks', NotesIcon: Shield, notesTone: 'indigo' },
   admin_credit_notice: { Icon: Coins, tone: 'amber', badge: 'Wallet Adjustment', title: 'System Admin Notice', notesLabel: 'Administrator Remarks', NotesIcon: Coins, notesTone: 'amber' },
   system_alert:        { Icon: Coins, tone: 'amber', badge: 'Wallet Adjustment', title: 'System Admin Notice', notesLabel: 'Administrator Remarks', NotesIcon: Coins, notesTone: 'amber' },
+  daily_reward:        { Icon: Coins, tone: 'amber', badge: 'Daily Reward', title: 'Daily Streak Reward', notesLabel: 'Reward received', NotesIcon: Coins, notesTone: 'amber' },
   report_updated:      { Icon: ShieldCheck, tone: 'blue', badge: 'Report Update', title: 'Trust & Safety Notice', notesLabel: 'Resolution Status', NotesIcon: ShieldCheck, notesTone: 'blue' },
   report:              { Icon: ShieldCheck, tone: 'blue', badge: 'Report Update', title: 'Trust & Safety Notice', notesLabel: 'Resolution Status', NotesIcon: ShieldCheck, notesTone: 'blue' },
   dispute_resolved:    { Icon: Scale, tone: 'emerald', badge: 'Escrow Verdict', title: 'Dispute Resolution Notice', notesLabel: 'Verdict Notes', NotesIcon: Scale, notesTone: 'emerald' },
@@ -175,8 +178,15 @@ const openLink = (navigation, url) => {
   });
   const [root, arg] = pathPart.split('/').filter(Boolean);
   if (root === 'skill' && arg) return goTo(navigation, 'SkillDetails', { id: arg, ...query });
+  if (root === 'sessions' && arg) return goTo(navigation, 'Sessions', { session: arg, ...query });
+  if (root === 'messages' && arg) return goTo(navigation, 'Messages', { user: arg, ...query });
+  if (root === 'community' && arg) return goTo(navigation, 'Community', { post: arg, ...query });
   if (root === 'user' && arg) return goTo(navigation, 'PublicProfile', { id: arg });
-  if (LINK_ROUTES[root]) return goTo(navigation, LINK_ROUTES[root], query);
+  if (LINK_ROUTES[root]) {
+    if (root === 'sessions' && query.id && !query.session) query.session = query.id;
+    if (root === 'community' && query.id && !query.post) query.post = query.id;
+    return goTo(navigation, LINK_ROUTES[root], query);
+  }
   return goTo(navigation, 'Dashboard');
 };
 
@@ -238,16 +248,9 @@ function extractModeratorDetails(rawContent) {
 }
 
 function Skeleton({ style }) {
-  const o = useRef(new Animated.Value(0.55)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(o, { toValue: 1, duration: 750, useNativeDriver: true }),
-      Animated.timing(o, { toValue: 0.55, duration: 750, useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [o]);
-  return <Animated.View style={[{ backgroundColor: T.line, borderRadius: 6, opacity: o }, style]} />;
+  return (
+  <View style={[{ backgroundColor: '#e9eff0', borderRadius: 6 }, style]} />
+  );
 }
 
 const NotificationsSkeleton = () => (
@@ -270,6 +273,7 @@ const NotificationsSkeleton = () => (
 
 // ─── MAIN COMPONENT ────────────────────────────────────────────────────────
 export default function Notifications() {
+  const { isDark } = useUserTheme();
   const navigation = useNavigation();
   const route = useRoute();
   const insets = useSafeAreaInsets();
@@ -331,7 +335,10 @@ export default function Notifications() {
                 : [payload.new, ...prev]);
             }
             if (payload.eventType === 'UPDATE') {
-              setNotifications((prev) => prev.map((n) => n.id === payload.new.id ? payload.new : n));
+              setNotifications((prev) => prev.map((n) => n.id === payload.new.id ? { ...n, ...payload.new } : n));
+            }
+            if (payload.eventType === 'DELETE') {
+              setNotifications((prev) => prev.filter((n) => n.id !== payload.old?.id));
             }
           },
         )
@@ -348,6 +355,11 @@ export default function Notifications() {
       if (channel) supabase.removeChannel(channel);
     };
   }, [navigation]);
+
+  // Catch events missed while the page was not focused (e.g. navigation, reconnect).
+  useFocusEffect(useCallback(() => {
+    if (currentUserId) loadNotifications(currentUserId);
+  }, [currentUserId, loadNotifications]));
 
   // phones go to the background: catch up when the app comes back
   useEffect(() => {
@@ -367,16 +379,25 @@ export default function Notifications() {
     if (!notif.is_read) {
       setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, is_read: true } : n));
       // wrapped in Promise.resolve so a failed update is caught whichever supabase-js version is installed
-      Promise.resolve(supabase.from('notifications').update({ is_read: true }).eq('id', notif.id)).catch((err) => console.error('Mark read failed:', err));
+      Promise.resolve(supabase.from('notifications').update({ is_read: true }).eq('id', notif.id))
+        .then(({ error }) => { if (error) console.error('Mark read failed:', error); })
+        .catch((err) => console.error('Mark read failed:', err));
     }
 
     const type = notif.type?.toLowerCase() || '';
 
     try {
       // ── SHEET TRIGGER FOR ALL REPORTS AND DISPUTES ──
-      const modalNoticeTypes = ['account_warning', 'account_penalized', 'admin_role_notice', 'admin_credit_notice', 'report_updated', 'report', 'dispute_resolved', 'system', 'system_alert'];
+      const modalNoticeTypes = ['account_warning', 'account_penalized', 'admin_role_notice', 'admin_credit_notice', 'report_updated', 'report', 'dispute_resolved', 'system', 'system_alert', 'daily_reward'];
       if (modalNoticeTypes.includes(type)) {
         setActiveNotice(notif);
+        return;
+      }
+
+      // Specific record links take precedence over category-wide default pages.
+      // Messages and community keep their own dedicated route param handling below.
+      if (isInternalLink(notif.link_url) && !['message', 'community', 'community_like', 'community_comment', 'community_reply'].includes(type)) {
+        openLink(navigation, notif.link_url);
         return;
       }
 
@@ -472,7 +493,9 @@ export default function Notifications() {
   }
 
   // ─── NOTICE SHEET CONTENT ───
-  const parsedNotice = activeNotice ? extractModeratorDetails(activeNotice.content) : null;
+  const parsedNotice = activeNotice ? (activeNotice.type === 'daily_reward'
+    ? { summary: 'Your daily streak bonus has been added to your wallet.', remarks: activeNotice.content }
+    : extractModeratorDetails(activeNotice.content)) : null;
   const notice = activeNotice ? (NOTICE_STYLES[activeNotice.type] || NOTICE_DEFAULT) : NOTICE_DEFAULT;
   const noticeTone = TONES[notice.tone];
   const notesTone = TONES[notice.notesTone];
@@ -494,28 +517,28 @@ export default function Notifications() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
       >
         {/* 0 · unread + mark all read */}
-        <View style={s.summary}>
+        <Reveal delay={90}><View style={s.summary}>
           <Text style={s.summaryText}>
             {unreadCount > 0 ? <><Text style={s.summaryNum}>{unreadCount}</Text> unread</> : 'All caught up'}
           </Text>
           {unreadCount > 0 && (
-            <Pressable onPress={handleMarkAllRead} hitSlop={8} style={s.markAll}>
+            <PressScale onPress={handleMarkAllRead} hitSlop={8} style={s.markAll}>
               <CheckCheck size={16} color={T.brand} strokeWidth={2} />
               <Text style={s.markAllText}>Mark all read</Text>
-            </Pressable>
+            </PressScale>
           )}
-        </View>
+        </View></Reveal>
 
         {/* 1 · sticky category tabs */}
-        <View style={s.top}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabsRow}>
+        <View style={[s.top, isDark && darkTabStyles.strip]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={isDark ? darkTabStyles.scroll : undefined} contentContainerStyle={s.tabsRow}>
             {TYPE_TABS.map((tab) => {
               const on = typeTab === tab;
               return (
                 <Pressable key={tab} onPress={() => setTypeTab(tab)} style={s.tab}>
                   <View style={s.tabInner}>
-                    <Text style={[s.tabText, on && s.tabTextOn]}>{tab}</Text>
-                    <Text style={[s.tabCount, on && { color: T.text }]}>{tabCounts[tab] || 0}</Text>
+                    <Text style={[s.tabText, on && s.tabTextOn, isDark && (on ? darkTabStyles.selectedText : darkTabStyles.unselectedText)]}>{tab}</Text>
+                    <Text style={[s.tabCount, on && { color: T.text }, isDark && (on ? darkTabStyles.selectedText : darkTabStyles.countText)]}>{tabCounts[tab] || 0}</Text>
                   </View>
                   <View style={[s.tabBar, on && { backgroundColor: T.brand }]} />
                 </Pressable>
@@ -610,7 +633,7 @@ export default function Notifications() {
                   <Text style={[s.sectionLabel, { marginBottom: 0, color: T.text }]}>{notice.notesLabel}</Text>
                 </View>
                 <View style={[s.notesBox, { backgroundColor: notesTone.bg, borderColor: notesTone.bd }]}>
-                  <Text style={[s.boxText, { color: notesTone.fg }]}>"{parsedNotice.remarks}"</Text>
+                  <Text style={[s.boxText, { color: notesTone.fg }]}>{activeNotice.type === 'daily_reward' ? parsedNotice.remarks : `"${parsedNotice.remarks}"`}</Text>
                 </View>
 
                 <View style={s.metaRow}>
@@ -618,12 +641,14 @@ export default function Notifications() {
                   <Text style={s.metaText}>Ref: #{String(activeNotice.id).split('-')[0]}</Text>
                 </View>
 
-                <View style={s.policy}>
-                  <Bell size={15} color={T.sub} strokeWidth={1.8} style={{ marginTop: 1 }} />
-                  <Text style={s.policyText}>
-                    SkillCredit strictly adheres to platform rules. System modifications are tracked and recorded for security purposes.
-                  </Text>
-                </View>
+                {activeNotice.type !== 'daily_reward' && (
+                  <View style={s.policy}>
+                    <Bell size={15} color={T.sub} strokeWidth={1.8} style={{ marginTop: 1 }} />
+                    <Text style={s.policyText}>
+                      SkillCredit strictly adheres to platform rules. System modifications are tracked and recorded for security purposes.
+                    </Text>
+                  </View>
+                )}
               </ScrollView>
 
               <View style={s.sheetBtns}>
@@ -656,16 +681,26 @@ export default function Notifications() {
   );
 }
 
+// The sticky category tab container needs its own dark palette because it
+// remains mounted while the notification feed scrolls beneath it.
+const darkTabStyles = StyleSheet.create({
+  strip: { backgroundColor: '#162329', borderTopColor: '#2b4249', borderBottomColor: '#2b4249' },
+  scroll: { backgroundColor: '#162329' },
+  selectedText: { color: '#eaf3f5' },
+  unselectedText: { color: '#b7c6d0' },
+  countText: { color: '#91a8b6' },
+});
+
 const s = StyleSheet.create({
   // summary
-  summary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 48, backgroundColor: '#fff' },
+  summary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, backgroundColor: '#F5FBF7', height: 57, borderBottomWidth: 1, borderBottomColor: '#DDEDE4'},
   summaryText: { fontSize: 14, color: T.sub },
-  summaryNum: { fontSize: 14, fontWeight: '700', color: T.text },
+  summaryNum: { fontSize: 14, fontWeight: '800', color: '#096D50'},
   markAll: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   markAllText: { fontSize: 14, fontWeight: '600', color: T.brand },
 
   // sticky tabs (column container; the tab row is a ScrollView inside)
-  top: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: T.line, borderBottomWidth: 1, borderBottomColor: T.line },
+  top: { borderTopWidth: 1, borderBottomWidth: 1, backgroundColor: '#FDFEFD', borderTopColor: '#DEEBE3', borderBottomColor: '#DEEBE3'},
   tabsRow: { paddingHorizontal: 16, gap: 24 },
   tab: { height: 44, justifyContent: 'center' },
   tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -675,17 +710,17 @@ const s = StyleSheet.create({
   tabBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, borderRadius: 2, backgroundColor: 'transparent' },
 
   // groups + rows
-  groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 34, backgroundColor: T.strip, borderBottomWidth: 1, borderBottomColor: T.line },
+  groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, borderBottomWidth: 1, backgroundColor: '#EEF7F1', borderBottomColor: '#DCEBE2', height: 37},
   groupTitle: { fontSize: 13, fontWeight: '700', color: T.sub },
   groupCount: { fontSize: 13, color: T.sub },
-  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
-  iconBubble: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, borderBottomWidth: 1, paddingVertical: 15, backgroundColor: '#FFFFFF', borderBottomColor: '#E6F0E9'},
+  iconBubble: { alignItems: 'center', justifyContent: 'center' , borderRadius: 15, width: 43, height: 43},
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   label: { flexShrink: 1, fontSize: 13, fontWeight: '700' },
   unreadDot: { width: 8, height: 8, borderRadius: 4 },
   time: { fontSize: 13, color: T.sub },
   content: { fontSize: 15, lineHeight: 21, marginTop: 2 },
-  contentUnread: { fontWeight: '600', color: T.text },
+  contentUnread: { fontWeight: '700', color: '#12352B'},
   contentRead: { fontWeight: '400', color: T.sub },
 
   // empty
@@ -695,7 +730,7 @@ const s = StyleSheet.create({
 
   // notice sheet
   overlay: { flex: 1, backgroundColor: 'rgba(15,20,25,0.5)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28},
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: T.border, marginTop: 8 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: T.line },
   sheetIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },

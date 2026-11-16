@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, DeviceEventEmitter, Linking, View } from 'react-native';
+import { DeviceEventEmitter, Linking } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import supabase from './supabaseClient';
+import { SkillCreditAlertProvider } from './components/SkillCreditAlert';
+import { UserThemeProvider, useUserTheme } from './components/premium/PremiumTheme';
 
 import SplashScreen from './pages/public/SplashScreen';
 import Login from './pages/auth/Login';
@@ -26,6 +28,7 @@ import MyListings from './pages/user/MyListings';
 import Payments from './pages/user/Payments';
 import Settings from './pages/user/Settings';
 import Notifications from './pages/user/Notifications';
+import SkiroAIChat from './pages/user/SkiroAIChat';
 
 import SkillReview from './pages/moderator/SkillReview';
 import DisputeDetails from './pages/moderator/DisputeDetails';
@@ -34,7 +37,8 @@ import TicketChat from './pages/support/TicketChat';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
-const header = (title) => ({ headerShown: true, title, headerTintColor: '#047857' });
+const header = (title) => ({ headerShown: true, title });
+const USER_STACK_NAMES = new Set(['User', 'SetupInterests', 'SkillDetails', 'CreateSkill', 'EditSkill', 'PublicProfile', 'Profile', 'MyListings', 'Payments', 'Settings', 'Notifications', 'SkiroAI']);
 const PASSWORD_RESET_URL_PART = 'reset-password';
 
 // Shared user screens are registered for every signed-in role. This is intentional:
@@ -51,6 +55,7 @@ const userScreens = (
     <Stack.Screen name="Payments" component={Payments} options={header('Wallet')} />
     <Stack.Screen name="Settings" component={Settings} options={header('Settings')} />
     <Stack.Screen name="Notifications" component={Notifications} options={header('Notifications')} />
+    <Stack.Screen name="SkiroAI" component={SkiroAIChat} options={{ headerShown: false }} />
   </>
 );
 
@@ -78,7 +83,8 @@ const readUrlParams = (url) => {
   return values;
 };
 
-export default function App() {
+function AppContent() {
+  const { isDark } = useUserTheme();
   const [splashDone, setSplashDone] = useState(false);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -236,15 +242,24 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
+      <SkillCreditAlertProvider>
       {!splashDone ? (
-        <SplashScreen onFinish={() => setSplashDone(true)} />
-      ) : loading || !initialRouteName ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-          <ActivityIndicator color="#047857" />
-        </View>
+        <SplashScreen
+          ready={!loading && !!initialRouteName}
+          onFinish={() => setSplashDone(true)}
+        />
       ) : (
         <NavigationContainer ref={navigationRef}>
-          <Stack.Navigator initialRouteName={initialRouteName} screenOptions={{ headerShown: false }}>
+          <Stack.Navigator initialRouteName={initialRouteName} screenOptions={({ route }) => ({
+            headerShown: false,
+            ...(USER_STACK_NAMES.has(route.name) ? {
+              animation: 'slide_from_right',
+              headerTintColor: isDark ? '#34d399' : '#047857',
+              headerStyle: { backgroundColor: isDark ? '#162329' : '#fff' },
+              headerTitleStyle: { color: isDark ? '#eaf3f5' : '#111827' },
+              contentStyle: { backgroundColor: isDark ? '#0c151b' : '#fff' },
+            } : {}),
+          })}>
             {/* Keep all root routes mounted in the navigator's route map. This prevents
                 role/session changes from removing a destination while another screen navigates. */}
             <Stack.Screen name="Login" component={Login} />
@@ -266,6 +281,13 @@ export default function App() {
           </Stack.Navigator>
         </NavigationContainer>
       )}
+      </SkillCreditAlertProvider>
     </SafeAreaProvider>
   );
+}
+
+// Provider is outside the navigator, so stack headers can respond to changes
+// from Settings without remounting or resetting the user's navigation state.
+export default function App() {
+  return <UserThemeProvider><AppContent /></UserThemeProvider>;
 }

@@ -1,6 +1,7 @@
+import { Alert } from '../../components/SkillCreditAlert';
 import { useState, useRef } from 'react';
 import {
-  View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Keyboard,
+  View, Text, Pressable, ScrollView, TextInput, ActivityIndicator, Keyboard,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -126,7 +127,7 @@ export default function Login() {
         contentContainerStyle={[s.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
       >
         <View style={s.head}>
-          <Text style={s.title}>Welcome back</Text>
+          <Text style={s.title}>Welcome</Text>
           <Text style={s.sub}>Log in to continue your learning journey.</Text>
         </View>
 

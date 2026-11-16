@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/ModLogs.jsx
 //  Same access check (Admin / Moderator only), same mod_logs query, search, action
@@ -8,8 +9,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, SectionList, FlatList, TextInput, Modal, ScrollView, Alert,
-  RefreshControl, AppState, ActivityIndicator, Platform, StyleSheet,
+  View, Text, Image, Pressable, SectionList, FlatList, TextInput, Modal, ScrollView, RefreshControl, AppState, ActivityIndicator, Platform, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -153,7 +153,11 @@ export default function ModLogs() {
       if (Date.now() - lastFetch.current > 3000) fetchModLogs(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchModLogs(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchModLogs(true);
+    const liveChannel = supabase.channel('mod_modlogs_live_' + Date.now())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mod_logs' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchModLogs(true); setRefreshing(false); };

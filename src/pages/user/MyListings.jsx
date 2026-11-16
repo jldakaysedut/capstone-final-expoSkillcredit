@@ -1,13 +1,12 @@
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, RefreshControl, Alert, Animated, StyleSheet,
+  RefreshControl, Animated, StyleSheet
 } from 'react-native';
+import { View, Text, Image, Pressable, ScrollView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import {
-  ArrowLeft, BookOpen, Briefcase, ChefHat, ChevronDown, CircleHelp, ClipboardList, Code2, Coins, Dumbbell,
-  ExternalLink, Film, Gamepad2, Hammer, Leaf, MessageCircle, Monitor, Music2, Palette, PenLine, Scissors,
-  Star, Tag, Trash2, Wrench, Zap,
-} from 'lucide-react-native';
+import { ArrowLeft, BookOpen, Briefcase, ChefHat, ChevronDown, CircleHelp, ClipboardList, Code2, PiggyBank, Dumbbell, ExternalLink, Film, Hammer, Leaf, MessageCircle, Monitor, Music2, Palette, PenLine, Scissors, Star, Tag, Trash2, Wrench, Zap } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // Compact X-style layout: summary line, underline filter tabs, hairline rows that expand in place
@@ -18,24 +17,21 @@ const T = {
 
 const CATEGORIES = [
   { name: 'Cooking & Baking',      icon: ChefHat,       color: '#f97316' },
-  { name: 'Gardening & Farming',   icon: Leaf,          color: '#16a34a' },
-  { name: 'Home & DIY',            icon: Hammer,        color: '#ca8a04' },
-  { name: 'Health & Fitness',      icon: Dumbbell,      color: '#ef4444' },
-  { name: 'Beauty & Grooming',     icon: Scissors,      color: '#ec4899' },
-  { name: 'Gaming & Hobbies',      icon: Gamepad2,      color: '#8b5cf6' },
-  { name: 'Electronics & Repair',  icon: Wrench,        color: '#3b82f6' },
-  { name: 'Electronics, Appliance & Basic Repair', icon: Wrench, color: '#3b82f6' },
-  { name: 'School & Tutoring',     icon: BookOpen,      color: '#6366f1' },
-  { name: 'Writing & Content',     icon: PenLine,       color: '#14b8a6' },
-  { name: 'Languages & Speaking',  icon: MessageCircle, color: '#06b6d4' },
-  { name: 'Singing & Instruments', icon: Music2,        color: '#d946ef' },
-  { name: 'Art & Graphic Design',  icon: Palette,       color: '#f43f5e' },
-  { name: 'Video & Animation',     icon: Film,          color: '#f59e0b' },
-  { name: 'Business & Freelance',  icon: Briefcase,     color: '#475569' },
-  { name: 'Financial Literacy',    icon: Coins,         color: '#059669' },
-  { name: 'Financial Literacy & Money Management', icon: Coins, color: '#059669' },
-  { name: 'UI/UX Design',          icon: Monitor,       color: '#0ea5e9' },
-  { name: 'Coding & Tech',         icon: Code2,         color: '#65a30d' },
+  { name: 'Gardening & Plant Care',   icon: Leaf,          color: '#16a34a' },
+  { name: 'Home Repair & DIY',            icon: Hammer,        color: '#ca8a04' },
+  { name: 'Fitness & Sports',      icon: Dumbbell,      color: '#ef4444' },
+  { name: 'Beauty & Personal Care',     icon: Scissors,      color: '#ec4899' },
+  { name: 'Computer, Phone & Electronics Help',  icon: Wrench,        color: '#3b82f6' },
+  { name: 'School Subjects & Tutoring',     icon: BookOpen,      color: '#6366f1' },
+  { name: 'Writing & Editing',     icon: PenLine,       color: '#14b8a6' },
+  { name: 'Languages & Public Speaking',  icon: MessageCircle, color: '#06b6d4' },
+  { name: 'Music & Singing', icon: Music2,        color: '#d946ef' },
+  { name: 'Graphic Design & Digital Art',  icon: Palette,       color: '#f43f5e' },
+  { name: 'Video, Animation & AI Content Creation',     icon: Film,          color: '#f59e0b' },
+  { name: 'Business, Entrepreneurship & Marketing',  icon: Briefcase,     color: '#475569' },
+  { name: 'Finance, Investing & Trading',    icon: PiggyBank,         color: '#059669' },
+  { name: 'Website & App Design',          icon: Monitor,       color: '#0ea5e9' },
+  { name: 'Coding & Programming',         icon: Code2,         color: '#65a30d' },
 ];
 const catInfo = (n) => CATEGORIES.find((c) => c.name === n) ?? { icon: Tag, color: '#6b7280' };
 
@@ -67,16 +63,9 @@ function QBar({ label, value }) {
 }
 
 function Skeleton({ style }) {
-  const o = useRef(new Animated.Value(0.55)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(o, { toValue: 1, duration: 750, useNativeDriver: true }),
-      Animated.timing(o, { toValue: 0.55, duration: 750, useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [o]);
-  return <Animated.View style={[{ backgroundColor: T.line, borderRadius: 6, opacity: o }, style]} />;
+  return (
+  <View style={[{ backgroundColor: '#e9eff0', borderRadius: 6 }, style]} />
+  );
 }
 
 function SkeletonRow() {
@@ -277,6 +266,14 @@ export default function MyListings() {
     didLoad.current = true;
   }, []));
 
+  // Live updates to owned listings; keep the existing fetch/selection logic intact.
+  useEffect(() => {
+    const liveChannel = supabase.channel('my_listings_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills' }, () => fetchMyListings(true))
+      .subscribe();
+    return () => { supabase.removeChannel(liveChannel); };
+  }, []);
+
   const onRefresh = async () => { setRefreshing(true); await fetchMyListings(true); setRefreshing(false); };
 
   // highlight a listing (route param `highlight`, was ?highlight= on the web)
@@ -351,7 +348,7 @@ export default function MyListings() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
     >
       {/* 0 · summary */}
-      <View style={s.summary}>
+      <Reveal delay={90}><View style={s.summary}>
         <Text style={s.heading} numberOfLines={1}>
           {profile?.full_name ? `${profile.full_name.split(' ')[0]}'s listings` : 'My listings'}
         </Text>
@@ -383,7 +380,7 @@ export default function MyListings() {
             )}
           </View>
         )}
-      </View>
+      </View></Reveal>
 
       {/* 1 · sticky filter tabs */}
       <View style={s.top}>
@@ -413,11 +410,11 @@ export default function MyListings() {
             <Text style={s.emptyTitle}>{filter === 'all' ? 'No listings yet' : 'No listings match this filter'}</Text>
             <Text style={s.emptySub}>{filter === 'all' ? 'Share your expertise with the community.' : 'Try switching to a different filter.'}</Text>
             {filter === 'all' ? (
-              <Pressable onPress={() => navigation.navigate('CreateSkill')} style={s.cta}><Text style={s.ctaText}>Create first listing</Text></Pressable>
+              <PressScale onPress={() => navigation.navigate('CreateSkill')} style={s.cta}><Text style={s.ctaText}>Create first listing</Text></PressScale>
             ) : (
-              <Pressable onPress={() => setFilter('all')} style={[s.cta, { backgroundColor: T.field, flexDirection: 'row', gap: 6 }]}>
+              <PressScale onPress={() => setFilter('all')} style={[s.cta, { backgroundColor: T.field, flexDirection: 'row', gap: 6 }]}>
                 <ArrowLeft size={16} color={T.text} /><Text style={[s.ctaText, { color: T.text }]}>Back to all</Text>
-              </Pressable>
+              </PressScale>
             )}
           </View>
         ) : (
@@ -442,8 +439,8 @@ export default function MyListings() {
 
 const s = StyleSheet.create({
   // summary
-  summary: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14, backgroundColor: '#fff' },
-  heading: { fontSize: 20, fontWeight: '700', color: T.text, letterSpacing: -0.3 },
+  summary: { paddingHorizontal: 16, backgroundColor: '#F6FBF8', paddingTop: 23, paddingBottom: 19, borderBottomWidth: 1, borderBottomColor: '#D8EDE1'},
+  heading: { fontSize: 23, fontWeight: '800', letterSpacing: -0.7, color: '#123B2A'},
   statsLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 4, marginTop: 8 },
   statLabel: { fontSize: 14, color: T.sub },
   statNum: { fontSize: 14, fontWeight: '700', color: T.text },
@@ -452,7 +449,7 @@ const s = StyleSheet.create({
   alertText: { fontSize: 13, fontWeight: '700' },
 
   // sticky tabs (column container; the tab row is a ScrollView inside)
-  top: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: T.line, borderBottomWidth: 1, borderBottomColor: T.line },
+  top: { borderTopWidth: 1, borderBottomWidth: 1, backgroundColor: '#FAFDFB', borderTopColor: '#E0EDE5', borderBottomColor: '#E0EDE5'},
   tabsRow: { paddingHorizontal: 16, gap: 24 },
   tab: { height: 44, justifyContent: 'center' },
   tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -462,8 +459,8 @@ const s = StyleSheet.create({
   tabBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, borderRadius: 2, backgroundColor: 'transparent' },
 
   // rows
-  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
-  rowHi: { backgroundColor: T.soft },
+  row: { flexDirection: 'row', gap: 12, paddingVertical: 14, borderBottomWidth: 1, backgroundColor: '#fff' , marginHorizontal: 12, marginTop: 9, paddingHorizontal: 13, borderRadius: 18, borderWidth: 1, borderColor: '#E0ECE5', borderBottomColor: '#E0ECE5', shadowColor: '#145C42', shadowOpacity: 0.04, shadowRadius: 6, shadowOffset:{width:0,height:2}, elevation: 1},
+  rowHi: { backgroundColor: '#EAF8F1'},
   thumb: { width: 56, height: 56, borderRadius: 12, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   zapBadge: { position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 8, backgroundColor: '#f59e0b', borderWidth: 1.5, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: T.text },

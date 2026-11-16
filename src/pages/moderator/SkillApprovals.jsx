@@ -70,7 +70,11 @@ export default function SkillApprovals() {
       if (Date.now() - lastFetch.current > 3000) fetchSkills(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchSkills(true); });
-    return () => { unsubFocus(); appSub.remove(); };
+    const refreshRealtime = () => fetchSkills(true);
+    const liveChannel = supabase.channel('mod_skillapprovals_live_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills' }, refreshRealtime)
+      .subscribe();
+    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchSkills(true); setRefreshing(false); };

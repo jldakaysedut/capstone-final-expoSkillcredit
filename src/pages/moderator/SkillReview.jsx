@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/SkillReview.jsx
 //  Same query, same claim / approve / decline rules, same notifications and decline
@@ -9,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useLayoutEffect } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, Modal, Alert, Linking, ActivityIndicator, StyleSheet,
+  View, Text, Image, Pressable, ScrollView, Modal, Linking, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

@@ -1,3 +1,6 @@
+import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
+import { Reveal, PressScale } from '../../components/premium/PremiumVisual';
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native), src/pages/user/EditSkill.jsx
 //  Replace the WHOLE content of your current EditSkill.jsx with this.
@@ -5,13 +8,13 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
-  View, Text, Image, Pressable, ScrollView, TextInput, Alert, ActivityIndicator,
-  BackHandler, KeyboardAvoidingView, Platform, StyleSheet,
+  BackHandler, Platform, StyleSheet
 } from 'react-native';
+import { ActivityIndicator, View, Text, Image, Pressable, ScrollView, TextInput, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { AlertCircle, ImagePlus, Lock, Minus, Plus, ShieldAlert, Unlock, X } from 'lucide-react-native';
+import { AlertCircle, ImagePlus, Lock, Minus, Plus, ShieldAlert, Unlock, X } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
 // ── type colors (X-style)
@@ -316,9 +319,7 @@ export default function EditSkill() {
 
   if (loading || !skill) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color={T.green} />
-      </View>
+      <UserScreenSkeleton type="editSkill" />
     );
   }
 
@@ -339,9 +340,9 @@ export default function EditSkill() {
       <View style={[s.top, { paddingTop: insets.top + 6 }]}>
         <Pressable onPress={handleClose} hitSlop={10} style={s.closeBtn}><X size={24} color={T.text} /></Pressable>
         <Text style={s.topTitle} numberOfLines={1}>{skill.title}</Text>
-        <Pressable onPress={handleSave} disabled={saving} style={[s.saveBtn, saving && { opacity: 0.6 }]}>
+        <PressScale onPress={handleSave} disabled={saving} style={[s.saveBtn, saving && { opacity: 0.6 }]}>
           {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.saveText}>Save</Text>}
-        </Pressable>
+        </PressScale>
       </View>
 
       <ScrollView
@@ -351,7 +352,7 @@ export default function EditSkill() {
         showsVerticalScrollIndicator={false}
       >
         {/* integrity rules, one small callout */}
-        <View style={s.callout}>
+        <Reveal delay={90}><View style={s.callout}>
           <ShieldAlert size={18} color="#2563eb" style={{ marginTop: 1 }} />
           <Text style={s.calloutText}>
             Title and category are locked to prevent bait-and-switch.{' '}
@@ -359,7 +360,7 @@ export default function EditSkill() {
               ? <Text style={{ fontWeight: '700', color: '#b45309' }}>Pricing and schedule are locked while you have active or pending sessions.</Text>
               : <Text style={{ color: '#047857' }}>Pricing and schedule can be edited now (no active sessions).</Text>}
           </Text>
-        </View>
+        </View></Reveal>
 
         {/* locked identity */}
         <View style={s.group}>
@@ -487,11 +488,11 @@ export default function EditSkill() {
               </View>
             </View>
           ) : (
-            <Pressable onPress={pickCover} style={s.coverEmpty}>
+            <PressScale onPress={pickCover} style={s.coverEmpty}>
               <ImagePlus size={28} color="#8b98a5" />
               <Text style={[s.itemName, { marginTop: 6 }]}>Tap to upload image</Text>
               <Text style={s.detail}>JPEG, PNG, WEBP (Max 5MB)</Text>
-            </Pressable>
+            </PressScale>
           )}
         </View>
       </ScrollView>
@@ -501,21 +502,21 @@ export default function EditSkill() {
 
 const s = StyleSheet.create({
   // top
-  top: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: '#fff' },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, borderBottomWidth: 1, backgroundColor: '#F8FCF9', borderBottomColor: '#D8EDE1', paddingBottom: 12},
   closeBtn: { width: 36, height: 44, alignItems: 'flex-start', justifyContent: 'center' },
-  topTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: T.text },
-  saveBtn: { minWidth: 72, height: 36, paddingHorizontal: 18, borderRadius: 18, backgroundColor: T.green, alignItems: 'center', justifyContent: 'center' },
+  topTitle: { flex: 1, fontWeight: '800', fontSize: 17, color: '#0A4B38'},
+  saveBtn: { minWidth: 72, paddingHorizontal: 18, backgroundColor: T.green, alignItems: 'center', justifyContent: 'center' , borderRadius: 14, height: 40, shadowColor: '#047857', shadowOpacity: 0.13, shadowRadius: 7, shadowOffset: {width:0,height:3}, elevation: 2},
   saveText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // text
-  h2: { fontSize: 17, fontWeight: '700', color: T.text, letterSpacing: -0.2 },
+  h2: { fontSize: 21, fontWeight: '800', color: '#0D3023', letterSpacing: -0.5},
   itemName: { fontSize: 15, fontWeight: '600', color: T.text },
   detail: { fontSize: 13, color: T.sub, lineHeight: 18 },
   label: { fontSize: 13, fontWeight: '600', color: T.sub, marginBottom: 8 },
   opt: { fontWeight: '400', color: '#8b98a5' },
 
   // callouts
-  callout: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginTop: 14, backgroundColor: '#eff6ff', borderRadius: 12, padding: 12 },
+  callout: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginTop: 14, padding: 12 , borderRadius: 18, backgroundColor: '#EEF8F4'},
   calloutText: { flex: 1, fontSize: 13, color: '#1e40af', lineHeight: 19 },
   warn: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginTop: 2, backgroundColor: '#fffbeb', borderRadius: 12, padding: 12 },
   warnText: { flex: 1, fontSize: 13, color: '#92400e', lineHeight: 19 },
@@ -529,8 +530,8 @@ const s = StyleSheet.create({
   lockedTag: { marginLeft: 'auto', fontSize: 12, fontWeight: '700', color: '#92400e', backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, overflow: 'hidden' },
 
   // forms
-  section: { paddingHorizontal: 16, paddingTop: 16 },
-  input: { backgroundColor: T.soft, borderRadius: 12, borderWidth: 1, borderColor: T.line, paddingHorizontal: 14, height: 48, fontSize: 15, color: T.text },
+  section: { paddingHorizontal: 18, paddingTop: 19},
+  input: { borderWidth: 1, paddingHorizontal: 14, fontSize: 15, color: T.text , backgroundColor: '#F8FBF9', borderColor: '#D8E8DF', borderRadius: 15, height: 50},
   textarea: { height: 120, paddingTop: 12, paddingBottom: 12 },
 
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, marginTop: 10 },
@@ -547,8 +548,8 @@ const s = StyleSheet.create({
   chip: { height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
 
   // cover
-  cover: { height: 190, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e5e7eb' },
+  cover: { height: 190, overflow: 'hidden', backgroundColor: '#e5e7eb' , borderRadius: 19},
   coverActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
   coverBtn: { flex: 1, height: 44, borderRadius: 22, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
-  coverEmpty: { height: 150, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#cfd9de', backgroundColor: T.soft, alignItems: 'center', justifyContent: 'center' },
+  coverEmpty: { height: 150, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#cfd9de', backgroundColor: T.soft, alignItems: 'center', justifyContent: 'center' , borderRadius: 18},
 });

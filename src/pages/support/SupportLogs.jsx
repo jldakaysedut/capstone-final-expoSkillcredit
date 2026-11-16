@@ -1,3 +1,4 @@
+import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/support/SupportLogs.jsx
 //  Mobile version of the web Audit logs. Same data + rules:
@@ -14,7 +15,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, Image, Pressable, SectionList, ScrollView, TextInput, Modal, Alert, RefreshControl, AppState, Platform, StyleSheet,
+  View, Text, Image, Pressable, SectionList, ScrollView, TextInput, Modal, RefreshControl, AppState, Platform, StyleSheet,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

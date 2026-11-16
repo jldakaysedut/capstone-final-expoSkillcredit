@@ -1,3 +1,4 @@
+import { Alert } from '../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/layouts/SupportLayout.jsx
 //  Redesigned to match ModLayout / UserLayout: one slim top bar (logo + "SkillCredit",
@@ -13,7 +14,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, Image, Pressable, Modal, Alert, ActivityIndicator, AppState, DeviceEventEmitter, StyleSheet,
+  View, Text, Image, Pressable, Modal, ActivityIndicator, AppState, DeviceEventEmitter, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
