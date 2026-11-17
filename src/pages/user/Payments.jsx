@@ -13,6 +13,7 @@ import { ActivityIndicator, View, Text, Pressable, SectionList, ScrollView, Text
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowDownRight, ArrowUpRight, Check, CheckCircle2, Clock, CreditCard, History, RefreshCcw, X, XCircle } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
 
@@ -20,6 +21,8 @@ const T = {
   text: '#0f1419', sub: '#536471', line: '#eff3f4', border: '#cfd9de',
   brand: '#047857', soft: '#ecfdf5', field: '#eff3f4', danger: '#e11d48',
 };
+
+const CHECKOUT_ATTEMPT_KEY = 'skillcredit_pending_paymongo_checkout_native';
 
 const TOPUP_PACKAGES = [
   { phpAmount: 100,  bonusCredits: 0 },
@@ -48,8 +51,30 @@ const fmtDate = (iso) => {
     : { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+// Match the Web ledger semantics: a top-up only becomes positive after 'paid'.
+const FINAL_TOPUP_STATUSES = ['paid', 'failed', 'expired', 'cancelled'];
+const unpaidTopupLabel = (status) => {
+  if (status === 'cancelled') return 'Cancelled — not credited';
+  if (status === 'failed') return 'Failed — not credited';
+  if (status === 'expired') return 'Expired — not credited';
+  if (status === 'pending') return 'Pending — not credited';
+  return `${status || 'Unconfirmed'} — not credited`;
+};
+const checkoutNotice = (status) => {
+  if (status === 'paid') return { tone: 'success', text: 'Payment verified. Your credits were added.' };
+  if (status === 'failed') return { tone: 'warn', text: 'Payment failed. No credits were added.' };
+  if (status === 'expired') return { tone: 'warn', text: 'Payment expired. No credits were added.' };
+  if (status === 'cancelled') return { tone: 'warn', text: 'Checkout cancelled. No credits were added.' };
+  return { tone: 'warn', text: 'Payment is still pending confirmation. No credits are counted until verified. Refresh later.' };
+};
+
 // icon + colours per transaction (same rules as the web)
 function txLook(tx) {
+  if (tx.type === 'TOPUP' && tx.status !== 'paid') {
+    return ['failed', 'cancelled', 'expired'].includes(tx.status)
+      ? { Icon: XCircle, bg: '#fff1f2', fg: '#e11d48' }
+      : { Icon: Clock, bg: '#fffbeb', fg: '#d97706' };
+  }
   if (tx.status === 'pending') return { Icon: Clock, bg: '#fffbeb', fg: '#d97706' };
   if (tx.status === 'failed') return { Icon: XCircle, bg: '#fff1f2', fg: '#e11d48' };
   if (tx.type === 'EARNED' || tx.type === 'TOPUP' || tx.type === 'DAILY_REWARD') return { Icon: ArrowDownRight, bg: '#ecfdf5', fg: '#059669' };
@@ -86,6 +111,7 @@ export default function Payments() {
   const userIdRef = useRef(null);
   const balanceRef = useRef(0);
   const pollRef = useRef(null);
+  const pollGenerationRef = useRef(0);
   const awaitingRef = useRef(false); // true while the user is out in the PayMongo checkout
   const checkoutTxRef = useRef(null); // the exact checkout transaction, never inferred from wallet balance
 
@@ -126,7 +152,7 @@ export default function Payments() {
           type: 'TOPUP',
           title: t.payment_method === 'gcash' ? 'GCash top-up' : t.payment_method === 'paymaya' ? 'Maya top-up' : 'PayMongo top-up',
           amount: t.credits_added,
-          isPositive: true,
+          isPositive: t.status === 'paid',
           date: t.created_at,
           status: t.status,
           meta: `₱${t.amount_php}`,
@@ -186,33 +212,80 @@ export default function Payments() {
     }
   };
 
-  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  const stopPoll = () => {
+    pollGenerationRef.current += 1;
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
+  };
 
-  // The webhook can arrive a few seconds after checkout, so we poll briefly.
+  // The HTTPS PayMongo return page is a WEB route, not a native deep link.
+  // Back/Close is therefore NOT proof of cancellation. Ask our authenticated
+  // backend for a provider-verified status when available, and always check
+  // the exact user's transaction for a confirmed credit before showing success.
+  const checkProviderStatus = async (txId) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('create-paymongo-checkout', {
+        body: { action: 'check_checkout_status', transaction_id: txId },
+        headers: { 'x-skillcredit-client': 'mobile' },
+      });
+      if (error || data?.error) return null; // older backend may not offer this action
+      return ['pending', ...FINAL_TOPUP_STATUSES].includes(data?.status) ? data.status : null;
+    } catch {
+      return null; // read-only DB status remains the conservative fallback
+    }
+  };
+
+  // Never infer a successful checkout from another top-up or a balance change.
+  // The signed webhook/server are the only sources that grant wallet credits.
   const confirmPayment = (txId) => {
     awaitingRef.current = false;
-    if (pollRef.current) return;
-    const startBalance = balanceRef.current;
-    setNotice({ tone: 'info', text: 'Confirming your payment…' });
+    stopPoll();
+    if (!txId) {
+      setNotice(checkoutNotice('pending'));
+      void load();
+      return;
+    }
+    const generation = pollGenerationRef.current;
+    setNotice({ tone: 'info', text: 'Checking this checkout with PayMongo…' });
     let tries = 0;
-    pollRef.current = setInterval(async () => {
-      tries++;
-      let paid = false;
-      if (txId) {
-        const { data } = await supabase.from('topup_transactions').select('status').eq('id', txId).single();
-        paid = data?.status === 'paid';
-      }
-      const res = await load();
-      if (!txId && res && res.balance > startBalance) paid = true;
 
-      if (paid) {
-        stopPoll();
-        setNotice({ tone: 'success', text: 'Payment received. Your credits were added.' });
-      } else if (tries >= 12) {
-        stopPoll();
-        setNotice({ tone: 'warn', text: 'We have not received the payment yet. If you paid, your credits will appear shortly.' });
+    const check = async () => {
+      if (generation !== pollGenerationRef.current) return;
+      tries += 1;
+      let status = 'pending';
+      try {
+        const uid = userIdRef.current;
+        const readStatus = async () => {
+          if (!uid) return null;
+          const { data, error } = await supabase.from('topup_transactions')
+            .select('status').eq('id', txId).eq('user_id', uid).maybeSingle();
+          return error ? null : data?.status;
+        };
+        status = (await readStatus()) || 'pending';
+        if (status === 'pending' && (tries === 1 || tries === 7)) {
+          const verified = await checkProviderStatus(txId);
+          if (verified && verified !== 'pending') {
+            // Failed/cancelled/expired may be reported by the verified server.
+            // For Paid, demand the actual credited DB transaction to avoid
+            // showing a premature success while the webhook is still arriving.
+            status = verified === 'paid' ? (await readStatus()) || 'pending' : verified;
+          }
+        }
+        if (FINAL_TOPUP_STATUSES.includes(status) || tries === 12) await load();
+      } catch (error) {
+        console.warn('Could not verify checkout status yet:', error);
       }
-    }, 1500);
+      if (generation !== pollGenerationRef.current) return;
+      if (FINAL_TOPUP_STATUSES.includes(status)) {
+        checkoutTxRef.current = null;
+        void AsyncStorage.removeItem(CHECKOUT_ATTEMPT_KEY).catch(() => {});
+        setNotice(checkoutNotice(status));
+      } else if (tries >= 12) {
+        setNotice(checkoutNotice('pending'));
+      } else {
+        pollRef.current = setTimeout(check, 1500);
+      }
+    };
+    void check();
   };
 
   // ── init + live updates
@@ -226,6 +299,21 @@ export default function Payments() {
       setLoading(false);
       const uid = userIdRef.current;
       if (!uid) return;
+      try {
+        const saved = await AsyncStorage.getItem(CHECKOUT_ATTEMPT_KEY);
+        if (saved && !disposed) {
+          const attempt = JSON.parse(saved);
+          if (attempt?.userId === uid && attempt?.transactionId && Date.now() - attempt.timestamp < 2 * 60 * 60 * 1000) {
+            checkoutTxRef.current = attempt.transactionId;
+            confirmPayment(attempt.transactionId);
+          } else {
+            await AsyncStorage.removeItem(CHECKOUT_ATTEMPT_KEY);
+          }
+        }
+      } catch (error) {
+        console.warn('Could not restore checkout attempt:', error);
+      }
+      if (disposed) return;
       channel = supabase.channel(`payments_live_${uid}_${Date.now()}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'topup_transactions', filter: `user_id=eq.${uid}` }, () => load())
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles', filter: `id=eq.${uid}` }, () => load())
@@ -248,13 +336,12 @@ export default function Payments() {
     };
   }, []);
 
-  // optional deep link back from checkout: navigate('Payments', { status, tx })
+  // Optional navigation return: a status parameter alone is never proof of payment.
   const pStatus = route.params?.status;
   const pTx = route.params?.tx;
   useEffect(() => {
     if (!pStatus || !pTx) return;
     navigation.setParams({ status: undefined, tx: undefined });
-    if (pStatus === 'cancelled') { setNotice({ tone: 'warn', text: 'Payment cancelled. No credits were added.' }); return; }
     confirmPayment(pTx);
   }, [pStatus, pTx]);
 
@@ -295,14 +382,32 @@ export default function Payments() {
       if (error) throw error;
       if (!data?.checkout_url) throw new Error(data?.error || 'Invalid response from payment gateway.');
 
+      stopPoll();
       checkoutTxRef.current = data.transaction_id || null;
       awaitingRef.current = true;
+      if (checkoutTxRef.current) {
+        try {
+          await AsyncStorage.setItem(CHECKOUT_ATTEMPT_KEY, JSON.stringify({
+            transactionId: checkoutTxRef.current,
+            userId: userIdRef.current,
+            timestamp: Date.now(),
+          }));
+        } catch (storageError) {
+          console.warn('Could not save pending checkout attempt:', storageError);
+        }
+      }
+      setNotice(null);
       setIsProcessing(false);
       setShowTopup(false);
       await new Promise((r) => setTimeout(r, 400)); // let the sheet finish closing before the browser opens
-      // PayMongo uses an HTTPS return page for mobile too. The user can close the
-      // browser and return to SkillCredit; the webhook (not this screen) awards credits.
-      await WebBrowser.openBrowserAsync(data.checkout_url);
+      // PayMongo returns to the HTTPS Web page. Closing/returning to Expo
+      // only starts verification; it must not mark the checkout cancelled.
+      try {
+        await WebBrowser.openBrowserAsync(data.checkout_url);
+      } catch (browserError) {
+        console.warn('Could not open checkout browser:', browserError);
+        setNotice({ tone: 'warn', text: 'Checkout could not open. Your pending transaction has not been credited.' });
+      }
       if (awaitingRef.current) confirmPayment(checkoutTxRef.current);
     } catch (error) {
       awaitingRef.current = false;
@@ -458,11 +563,19 @@ export default function Payments() {
                 <Text style={s.detail} numberOfLines={1}>{fmtDate(tx.date)} · {tx.meta}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[s.amount, { color: tx.isPositive ? '#059669' : T.text }]}>
-                  {tx.isPositive ? '+' : '−'}{tx.amount} CR
+                <Text style={[s.amount, { color: tx.type === 'TOPUP' && tx.status !== 'paid' ? T.sub : tx.isPositive ? '#059669' : T.text }]}>
+                  {tx.type === 'TOPUP' && tx.status !== 'paid' ? '' : tx.isPositive ? '+' : '−'}{tx.amount} CR
                 </Text>
-                {tx.status === 'pending' && <Text style={[s.status, { color: '#b45309' }]}>Pending</Text>}
-                {tx.status === 'failed' && <Text style={[s.status, { color: '#be123c' }]}>Failed</Text>}
+                {tx.type === 'TOPUP' ? (
+                  <Text style={[s.status, { color: tx.status === 'paid' ? '#047857' : ['cancelled', 'failed', 'expired'].includes(tx.status) ? '#be123c' : '#b45309' }]}>
+                    {tx.status === 'paid' ? 'Success — credited' : unpaidTopupLabel(tx.status)}
+                  </Text>
+                ) : (
+                  <>
+                    {tx.status === 'pending' && <Text style={[s.status, { color: '#b45309' }]}>Pending</Text>}
+                    {tx.status === 'failed' && <Text style={[s.status, { color: '#be123c' }]}>Failed</Text>}
+                  </>
+                )}
               </View>
             </View>
           );
