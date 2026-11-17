@@ -432,7 +432,16 @@ function TopBar({ profile, unreadCount, onBrand, onProfile, onCredits, isDark })
     <View style={[s.topBar, { paddingTop: insets.top }]}>
       <View style={s.topRow}>
         <Pressable onPress={onBrand} hitSlop={8} style={s.leftGroup} accessibilityLabel="Go to Browse">
-          <Image source={require('../assets/logo.png')} style={s.brandLogo} resizeMode="contain" />
+          <View style={s.brandLogoFrame} pointerEvents="none">
+            <Image source={require('../assets/logo.png')} style={s.brandLogo} resizeMode="contain" />
+            {isDark && (
+              <Image
+                source={require('../assets/logo.png')}
+                style={[s.brandLogo, s.brandLogoDarkHighlight]}
+                resizeMode="contain"
+              />
+            )}
+          </View>
           <Text style={s.brand} numberOfLines={1}>
             <Text style={[s.brandSkill, isDark && s.brandSkillDark]}>Skill</Text><Text style={[s.brandCredit, isDark && s.brandCreditDark]}>Credit</Text>
           </Text>
@@ -872,7 +881,11 @@ const s = StyleSheet.create({
   topBar: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: T.line },
   topRow: { height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, gap: 8 },
   leftGroup: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  brandLogo: { width: 25, height: 25, flexShrink: 0 },
+  brandLogoFrame: { width: 25, height: 25, flexShrink: 0, position: 'relative' },
+  brandLogo: { width: 25, height: 25 },
+  // Mix a soft mint highlight over the *original* green/gold image in dark mode.
+  // Keep the untinted base image visible, so gold details are not replaced by a flat tint.
+  brandLogoDarkHighlight: { position: 'absolute', top: 0, left: 0, tintColor: '#a7f3d0', opacity: 0.42 },
   rightGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   brand: { flexShrink: 1, fontSize: 17, fontWeight: '900', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', letterSpacing: -0.3 },
   brandSkill: { color: '#2d6a4f' },
