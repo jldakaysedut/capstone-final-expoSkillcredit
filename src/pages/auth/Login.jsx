@@ -48,13 +48,45 @@ export default function Login() {
       if (authError) throw authError;
 
       // 2. Fetch role, is_banned, deleted status, and has_set_interests
-      const { data: profile, error: profileError } = await supabase
+      let { data: profile, error: profileError } = await supabase
         .from('user_profiles')
         .select('role, is_banned, is_deleted, is_active, has_set_interests')
         .eq('id', authData.user.id)
-        .single();
+        .maybeSingle();
 
       if (profileError) throw profileError;
+
+      if (!profile) {
+        // With Confirm Email ON, signup has no session and therefore no public
+        // profile yet. Supabase Auth has now allowed a successful password login.
+        // Never create/credit a profile based only on a typed email address.
+        const verifiedEmail = authData.user.email;
+        if (!verifiedEmail) throw new Error('Unable to finish account setup. Please contact support.');
+        const metadataName = authData.user.user_metadata?.full_name;
+        const initialName = typeof metadataName === 'string' && metadataName.trim()
+          ? metadataName.trim()
+          : verifiedEmail.split('@')[0];
+
+        // INSERT only. On a duplicate-key race, re-read the existing record;
+        // never UPSERT/UPDATE starter credits on an established account.
+        const { error: insertError } = await supabase.from('user_profiles').insert([{
+          id: authData.user.id,
+          email: verifiedEmail.trim().toLowerCase(),
+          full_name: initialName,
+          credits_balance: 20,
+          has_set_interests: false,
+        }]);
+        if (insertError && insertError.code !== '23505') throw insertError;
+
+        const refreshed = await supabase
+          .from('user_profiles')
+          .select('role, is_banned, is_deleted, is_active, has_set_interests')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+        if (refreshed.error) throw refreshed.error;
+        if (!refreshed.data) throw new Error('Account profile could not be loaded. Please try again.');
+        profile = refreshed.data;
+      }
 
       // BOUNCER CHECK
       if (profile.is_banned) {

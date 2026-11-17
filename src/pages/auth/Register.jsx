@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Eye, EyeOff, Rocket } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff, Rocket, MailCheck } from 'lucide-react-native';
 import supabase from '../../supabaseClient';
 
 // Compact X-style layout: open white screen, filled inputs, one primary pill button
@@ -47,6 +47,9 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [focus, setFocus] = useState('');
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
 
   const handleRegister = async () => {
     setErrorMsg('');
@@ -69,6 +72,12 @@ export default function Register() {
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
+        options: {
+          // An authenticated first login uses this to create the public profile.
+          data: { full_name: fullName.trim() },
+          // Existing Android APK scheme: verify in browser, return to native Login.
+          emailRedirectTo: 'skillcredit://login',
+        },
       });
       if (authError) {
         if (/already registered|already exists|user already registered|email.*(in use|registered)/i.test(authError.message || '')) {
@@ -83,7 +92,10 @@ export default function Register() {
       }
       if (!authData?.user) throw new Error('Registration was not completed. Please try again.');
       if (!authData.session) {
-        setErrorMsg('Please check your email to confirm your account before logging in.');
+        // Confirmation is pending: don't create a profile or grant credits yet.
+        setVerificationEmail(normalizedEmail);
+        setPassword('');
+        setConfirmPassword('');
         return;
       }
       // Only authenticated new registrations receive their one-time 20 CR profile.
@@ -103,6 +115,25 @@ export default function Register() {
       setErrorMsg(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!verificationEmail || resendLoading) return;
+    setResendLoading(true);
+    setResendMessage('');
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: verificationEmail,
+        options: { emailRedirectTo: 'skillcredit://login' },
+      });
+      if (error) throw error;
+      setResendMessage('If confirmation is still pending, a new email should arrive shortly. Check Spam too.');
+    } catch (error) {
+      setResendMessage(error.message || 'Unable to resend the email. Try again later.');
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -127,8 +158,10 @@ export default function Register() {
         contentContainerStyle={[s.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
       >
         <View style={s.head}>
-          <Text style={s.title}>Create an account</Text>
-          <Text style={s.sub}>Join the community and start learning today.</Text>
+          <Text style={s.title}>{verificationEmail ? 'Check your email' : 'Create an account'}</Text>
+          <Text style={s.sub}>{verificationEmail
+            ? 'Verify your email address before signing in to SkillCredit.'
+            : 'Join the community and start learning today.'}</Text>
         </View>
 
         {!!errorMsg && (
@@ -137,6 +170,26 @@ export default function Register() {
           </View>
         )}
 
+        {verificationEmail ? (
+          <View style={s.verifyWrap}>
+            <MailCheck size={40} color={T.brand} strokeWidth={1.6} />
+            <Text style={s.verifyHeading}>We sent a confirmation link to</Text>
+            <Text style={s.verifyEmail} selectable>{verificationEmail}</Text>
+            <Text style={s.verifyHelp}>Open your email, tap the confirmation link, then return to the SkillCredit app and log in normally. You will get your 20 starter credits after your account is set up.</Text>
+            {!!resendMessage && <Text style={s.verifyHelp}>{resendMessage}</Text>}
+            <Pressable
+              onPress={handleResendVerification}
+              disabled={resendLoading}
+              style={({ pressed }) => [s.button, s.verifyButton, resendLoading && { opacity: 0.55 }, pressed && { backgroundColor: '#065f46' }]}
+            >
+              {resendLoading ? <ActivityIndicator color="#fff" /> : <Text style={s.buttonText}>Resend verification email</Text>}
+            </Pressable>
+            <Pressable onPress={() => navigation.navigate('Login')} hitSlop={10} style={s.loginLink}>
+              <Text style={s.link}>Back to Login</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
         <Input
           label="Full name"
           value={fullName}
@@ -222,6 +275,8 @@ export default function Register() {
             <Text style={s.link}>Log in here</Text>
           </Pressable>
         </View>
+          </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -246,6 +301,12 @@ const s = StyleSheet.create({
   button: { height: 48, borderRadius: 24, backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   buttonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
+  verifyWrap: { alignItems: 'center', paddingTop: 22 },
+  verifyHeading: { textAlign: 'center', color: T.text, fontSize: 15, fontWeight: '600', marginTop: 16 },
+  verifyEmail: { textAlign: 'center', color: T.brand, fontSize: 15, fontWeight: '700', marginTop: 8 },
+  verifyHelp: { textAlign: 'center', color: T.sub, fontSize: 14, lineHeight: 21, marginTop: 16 },
+  verifyButton: { width: '100%', paddingHorizontal: 12, marginTop: 26 },
+  loginLink: { marginTop: 22, paddingVertical: 8 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 24 },
   footerText: { fontSize: 14, color: T.sub },
   link: { fontSize: 14, fontWeight: '600', color: T.brand },

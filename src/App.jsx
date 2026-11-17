@@ -137,9 +137,28 @@ function AppContent() {
   const handleIncomingUrl = useCallback(async (url) => {
     if (!url || handledUrls.current.has(url)) return;
     const params = readUrlParams(url);
+    // A confirmation link redirects back to the installed Android app.
+    // Supabase already verified the email server-side. Do NOT consume signup
+    // tokens or alter any existing authenticated session here: the user should
+    // sign in normally with their password on the original Login screen.
+    const isSignupReturn = /^skillcredit:\/\/login(?:[/?#]|$)/i.test(url);
+    if (isSignupReturn) {
+      handledUrls.current.add(url);
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session) {
+        if (navigationRef.isReady()) {
+          navigationRef.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
+        } else {
+          setInitialRouteName('Login');
+        }
+      }
+      return;
+    }
+
+    // An expired signup link can include error_code. Never send that to the
+    // password-reset screen; only recovery URLs are password-reset flows.
     const isPasswordReset = url.toLowerCase().includes(PASSWORD_RESET_URL_PART)
-      || params.type === 'recovery'
-      || !!params.error_code;
+      || params.type === 'recovery';
 
     if (!isPasswordReset) return;
     handledUrls.current.add(url);
