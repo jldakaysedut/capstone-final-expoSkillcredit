@@ -9,7 +9,7 @@
 //  are UNCHANGED.
 // ═══════════════════════════════════════════════════════════════
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, Text, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, Image, Modal, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,7 +48,7 @@ function TopBar({ onAccount }) {
       <View style={s.logoRow}>
         <Image source={require('../assets/logo.png')} style={s.logo} resizeMode="contain" />
         <View>
-          <Text style={s.brand}>SkillCredit</Text>
+          <Text style={s.brand} numberOfLines={1}><Text style={s.brandSkill}>Skill</Text><Text style={s.brandCredit}>Credit</Text></Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <ShieldAlert size={12} color={T.green} />
             <Text style={s.caption}>Admin console</Text>
@@ -202,7 +202,9 @@ const s = StyleSheet.create({
   },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   logo: { width: 32, height: 32 },
-  brand: { fontSize: 19, fontWeight: '700', color: '#064e3b', letterSpacing: -0.3 },
+  brand: { fontSize: 19, fontWeight: '900', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', letterSpacing: -0.3 },
+  brandSkill: { color: '#2d6a4f' },
+  brandCredit: { color: '#111111' },
   caption: { fontSize: 12, fontWeight: '700', color: T.green },
   pill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#e5e7eb',

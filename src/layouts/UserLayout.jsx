@@ -426,14 +426,16 @@ const FloatingHelpButton = ({ bottomOffset }) => {
 };
 
 // ────────────────────── TOP BAR (replaces the web navbar)
-function TopBar({ profile, unreadCount, onBrand, onProfile, onCredits }) {
+function TopBar({ profile, unreadCount, onBrand, onProfile, onCredits, isDark }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[s.topBar, { paddingTop: insets.top }]}>
       <View style={s.topRow}>
-        {/* logo: swap the text for <Image source={require('../../assets/logo.png')} /> if you have one */}
         <Pressable onPress={onBrand} hitSlop={8} style={s.leftGroup} accessibilityLabel="Go to Browse">
-          <Text style={s.brand} numberOfLines={1}>SkillCredit</Text>
+          <Image source={require('../assets/logo.png')} style={s.brandLogo} resizeMode="contain" />
+          <Text style={s.brand} numberOfLines={1}>
+            <Text style={[s.brandSkill, isDark && s.brandSkillDark]}>Skill</Text><Text style={[s.brandCredit, isDark && s.brandCreditDark]}>Credit</Text>
+          </Text>
         </Pressable>
 
         <View style={s.rightGroup}>
@@ -780,6 +782,7 @@ export default function UserLayout() {
               onBrand={() => navigation.navigate('User', { screen: 'Dashboard' })}
               onProfile={() => setIsProfileOpen(true)}
               onCredits={() => navigation.navigate('Payments')}
+              isDark={isDark}
             />
           ),
           tabBarActiveTintColor: isDark ? '#34d399' : T.brand,
@@ -868,9 +871,14 @@ const s = StyleSheet.create({
   // top bar
   topBar: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: T.line },
   topRow: { height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, gap: 8 },
-  leftGroup: { flexShrink: 1 },
+  leftGroup: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  brandLogo: { width: 25, height: 25, flexShrink: 0 },
   rightGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
-  brand: { flexShrink: 1, fontSize: 17, fontWeight: '700', color: '#064e3b', letterSpacing: -0.3 },
+  brand: { flexShrink: 1, fontSize: 17, fontWeight: '900', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', letterSpacing: -0.3 },
+  brandSkill: { color: '#2d6a4f' },
+  brandCredit: { color: '#111111' },
+  brandSkillDark: { color: '#80e5b6' },
+  brandCreditDark: { color: '#f4f7f8' },
   credits: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 30, paddingHorizontal: 10, borderRadius: 15, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
   creditsText: { fontSize: 13, fontWeight: '700', color: '#b45309' },
   avatarDot: { position: 'absolute', top: -2, right: -2, width: 11, height: 11, borderRadius: 6, backgroundColor: '#f43f5e', borderWidth: 2, borderColor: '#fff' },
