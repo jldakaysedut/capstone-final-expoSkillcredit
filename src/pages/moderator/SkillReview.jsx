@@ -12,7 +12,7 @@ import { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View, Text, Image, Pressable, ScrollView, Modal, Linking, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft, CheckCircle2, Clock, ExternalLink, FileImage, FileText, Hand, MessageCircle, ShieldAlert,
@@ -49,6 +49,7 @@ export default function SkillReview() {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const id = route.params?.id;
+  const isFocused = useIsFocused();
 
   const [skill, setSkill] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -69,6 +70,19 @@ export default function SkillReview() {
   useEffect(() => {
     fetchData();
   }, [id]);
+
+  // Keep a case open on another moderator's phone up to date without reopening it.
+  useEffect(() => {
+    if (!id || !isFocused) return;
+    let timer;
+    const channel = supabase.channel(`skill_review_live_${id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills', filter: `id=eq.${id}` }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fetchData(), 350);
+      })
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [id, isFocused]);
 
   const fetchData = async () => {
     try {

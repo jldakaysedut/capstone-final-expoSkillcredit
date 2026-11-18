@@ -264,14 +264,22 @@ export default function Profile() {
   }, [fetchAll]);
 
   useEffect(() => {
-    const liveChannel = supabase.channel('profile_relations_live_' + Date.now())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, fetchAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_items' }, fetchAll)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sessions' }, fetchAll)
-      .subscribe();
     const offFocus = navigation.addListener('focus', fetchAll);
-    return () => { offFocus(); supabase.removeChannel(liveChannel); };
-  }, [fetchAll, navigation]);
+    if (!user?.id) return () => offFocus();
+    let timer;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { void fetchAll(); }, 400);
+    };
+    // Narrow the previous global listeners to this profile, and include skills.
+    const liveChannel = supabase.channel('profile_relations_live_' + user.id + '_' + Date.now())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `instructor_id=eq.${user.id}` }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_items', filter: `user_id=eq.${user.id}` }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `instructor_id=eq.${user.id}` }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills', filter: `instructor_id=eq.${user.id}` }, schedule)
+      .subscribe();
+    return () => { clearTimeout(timer); offFocus(); supabase.removeChannel(liveChannel); };
+  }, [fetchAll, navigation, user?.id]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchAll(); setRefreshing(false); };
 

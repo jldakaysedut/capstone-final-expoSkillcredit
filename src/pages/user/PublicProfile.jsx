@@ -148,6 +148,28 @@ export default function PublicProfile() {
     return () => { disposed = true; };
   }, [load]);
 
+  // Keep an open public profile in sync when the owner/other users change it.
+  useEffect(() => {
+    if (!id) return undefined;
+    let refreshTimer;
+    const scheduleRefresh = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => load(), 400);
+    };
+    const channel = supabase.channel(`public_profile_live_${id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_profiles', filter: `id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `instructor_id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `instructor_id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills', filter: `instructor_id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'portfolio_items', filter: `user_id=eq.${id}` }, scheduleRefresh)
+      // Unfiltered DELETE is needed where only a deleted primary key is broadcast.
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reviews' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'skills' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'portfolio_items' }, scheduleRefresh)
+      .subscribe();
+    return () => { clearTimeout(refreshTimer); supabase.removeChannel(channel); };
+  }, [id, load]);
+
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   if (loading) return <ProfileSkeleton />;

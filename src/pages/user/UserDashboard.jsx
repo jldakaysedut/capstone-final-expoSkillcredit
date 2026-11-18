@@ -271,6 +271,22 @@ export default function UserDashboard() {
     };
   }, [load]);
 
+  // Bookmarks saved/removed on a second device should update without reloading
+  // the dashboard's full skills feed. Keep local optimistic hearts intact.
+  useEffect(() => {
+    if (!currentUser?.id) return undefined;
+    let refreshTimer;
+    const onRemoteSave = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => fetchSaved(currentUser.id), 350);
+    };
+    const channel = supabase.channel(`dashboard_bookmarks_${currentUser.id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'saved_skills', filter: `user_id=eq.${currentUser.id}` }, onRemoteSave)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'saved_skills' }, onRemoteSave)
+      .subscribe();
+    return () => { clearTimeout(refreshTimer); supabase.removeChannel(channel); };
+  }, [currentUser?.id]);
+
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const toggleSave = useCallback(async (skillId) => {

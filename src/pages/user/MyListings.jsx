@@ -266,12 +266,32 @@ export default function MyListings() {
     didLoad.current = true;
   }, []));
 
-  // Live updates to owned listings; keep the existing fetch/selection logic intact.
+  // Listings metrics depend on skills AND sessions/reviews, including other users' actions.
+  // Listen only for this instructor's rows and batch multi-table events into one refresh.
   useEffect(() => {
-    const liveChannel = supabase.channel('my_listings_live_' + Date.now())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills' }, () => fetchMyListings(true))
-      .subscribe();
-    return () => { supabase.removeChannel(liveChannel); };
+    let active = true;
+    let liveChannel;
+    let refreshTimer;
+    const scheduleRefresh = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => { if (active) fetchMyListings(true); }, 450);
+    };
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!active || !user) return;
+      const own = `instructor_id=eq.${user.id}`;
+      liveChannel = supabase.channel('my_listings_live_' + Date.now())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'skills', filter: own }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: own }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: own }, scheduleRefresh)
+        // Supabase cannot reliably apply row filters to DELETE notifications.
+        // Rare deletes reconcile this user's own listings without changing data.
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'skills' }, scheduleRefresh)
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'sessions' }, scheduleRefresh)
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reviews' }, scheduleRefresh)
+        .subscribe();
+    })();
+    return () => { active = false; clearTimeout(refreshTimer); if (liveChannel) supabase.removeChannel(liveChannel); };
   }, []);
 
   const onRefresh = async () => { setRefreshing(true); await fetchMyListings(true); setRefreshing(false); };

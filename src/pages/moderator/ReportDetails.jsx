@@ -15,7 +15,7 @@ import { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View, Text, Image, Pressable, ScrollView, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronDown, ChevronLeft, ChevronRight, X, ArrowLeft, AlertTriangle, Scale,
@@ -214,6 +214,7 @@ export default function ReportDetails() {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const id = route.params?.id;
+  const isFocused = useIsFocused();
 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [report, setReport] = useState(null);
@@ -266,8 +267,8 @@ export default function ReportDetails() {
     }
   };
 
-  const fetchReportData = async () => {
-    setLoading(true);
+  const fetchReportData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setCurrentUserId(user.id);
@@ -299,13 +300,46 @@ export default function ReportDetails() {
     } catch (err) {
       console.error('Failed to load incident report dossier:', err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchReportData();
   }, [id]);
+
+  // The case, linked reports, evidence post and comments can be edited on
+  // another moderator's device. Debounce silent reloads to keep the sheet stable.
+  useEffect(() => {
+    if (!id || !isFocused) return;
+    let timer;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchReportData(true), 400);
+    };
+    const referenceId = report?.reference_id;
+    const isComment = Boolean(report?.reference_type?.toLowerCase().includes('comment'));
+    const postId = isComment ? reportedComment?.post_id : referenceId;
+    let channel = supabase.channel(`report_detail_live_${id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports', filter: `id=eq.${id}` }, schedule);
+    if (referenceId) {
+      channel = channel.on('postgres_changes', {
+        event: '*', schema: 'public', table: 'reports', filter: `reference_id=eq.${referenceId}`,
+      }, schedule);
+      if (isComment) {
+        channel = channel.on('postgres_changes', {
+          event: '*', schema: 'public', table: 'community_comments', filter: `id=eq.${referenceId}`,
+        }, schedule);
+      }
+    }
+    if (postId) {
+      channel = channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'community_posts', filter: `id=eq.${postId}` }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'community_comments', filter: `post_id=eq.${postId}` }, schedule);
+    }
+    channel.subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [id, isFocused, report?.reference_id, report?.reference_type, reportedComment?.post_id]);
 
   const isParticipant = Boolean(currentUserId && report && (clusteredReports.some((r) => r.reporter_id === currentUserId) || currentUserId === report.reported_user_id));
 

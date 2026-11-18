@@ -184,6 +184,32 @@ export default function SkillDetails() {
     return () => { appSub.remove(); creditSub.remove(); };
   }, [load]);
 
+  // Changes to this listing, reviews, bookings or either party's profile
+  // appear while the details screen stays open (not only on app foreground).
+  useEffect(() => {
+    if (!id) return undefined;
+    let refreshTimer;
+    const scheduleRefresh = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => load(), 400);
+    };
+    let channel = supabase.channel(`skill_details_live_${id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skills', filter: `id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `skill_id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `skill_id=eq.${id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reviews' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'skills' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'sessions' }, scheduleRefresh);
+    if (skill?.instructor_id) {
+      channel = channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles', filter: `id=eq.${skill.instructor_id}` }, scheduleRefresh);
+    }
+    if (currentUserId && currentUserId !== skill?.instructor_id) {
+      channel = channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles', filter: `id=eq.${currentUserId}` }, scheduleRefresh);
+    }
+    channel.subscribe();
+    return () => { clearTimeout(refreshTimer); supabase.removeChannel(channel); };
+  }, [id, skill?.instructor_id, currentUserId, load]);
+
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const goBack = () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('User', { screen: 'Dashboard' }));

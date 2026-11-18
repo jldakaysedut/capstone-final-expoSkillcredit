@@ -14,7 +14,7 @@ import { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View, Text, Image, Pressable, ScrollView, Modal, Linking, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, Check, Clock, Download, Hand, Users, Wallet, X,
@@ -95,6 +95,7 @@ export default function DisputeDetails() {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const id = route.params?.id;
+  const isFocused = useIsFocused();
 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [report, setReport] = useState(null);
@@ -161,8 +162,8 @@ export default function DisputeDetails() {
     fetchSkillDetails();
   }, [selectedBookingData]);
 
-  const fetchDisputeData = async (userId) => {
-    setLoading(true);
+  const fetchDisputeData = async (userId, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data: reportData, error: reportErr } = await supabase
         .from('reports')
@@ -199,7 +200,7 @@ export default function DisputeDetails() {
     } catch (err) {
       console.error('Failed to load dispute dossier:', err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -210,6 +211,26 @@ export default function DisputeDetails() {
     };
     init();
   }, [id]);
+
+  // Listen only while this dispute is visible; session/messages listeners attach
+  // after the initial report has supplied its referenced session.
+  useEffect(() => {
+    if (!id || !isFocused || !currentUserId) return;
+    let timer;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchDisputeData(currentUserId, true), 400);
+    };
+    let channel = supabase.channel(`dispute_detail_live_${id}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports', filter: `id=eq.${id}` }, schedule);
+    if (session?.id) {
+      channel = channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${session.id}` }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `session_id=eq.${session.id}` }, schedule);
+    }
+    channel.subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [id, isFocused, currentUserId, session?.id]);
 
   const isParticipant = Boolean(currentUserId && session && (currentUserId === session.student_id || currentUserId === session.instructor_id));
 

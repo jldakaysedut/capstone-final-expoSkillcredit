@@ -28,8 +28,9 @@ export default function PlatformViewer() {
   const [reloadKey, setReloadKey] = useState(0);
   useFocusEffect(useCallback(() => {
     let isCurrent = true;
-    const fetchData = async () => {
-      setLoading(true); setErrorMessage('');
+    const fetchData = async (silent = false) => {
+      if (!silent) setLoading(true);
+      setErrorMessage('');
       try {
         let result;
         if (tab === 'skills') {
@@ -62,7 +63,21 @@ export default function PlatformViewer() {
       finally { if (isCurrent) { setLoading(false); setRefreshing(false); } }
     };
     fetchData();
-    return () => { isCurrent = false; };
+    // Only the table currently being viewed; avoid subscribing to all three tabs.
+    let refreshTimer;
+    const onChange = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => { if (isCurrent) fetchData(true); }, 450);
+    };
+    const table = tab === 'community' ? 'community_posts' : tab;
+    const channel = supabase.channel(`platform_viewer_${table}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, onChange)
+      .subscribe();
+    return () => {
+      isCurrent = false;
+      clearTimeout(refreshTimer);
+      supabase.removeChannel(channel);
+    };
   }, [tab, subFilter, reloadKey]));
   const filtered = useMemo(() => { const q = searchQuery.trim().toLowerCase(); return data.filter(item => !q || `${getItemTitle(item, tab)} ${getStatus(item, tab)}`.toLowerCase().includes(q)); }, [data, tab, searchQuery]);
   const chooseTab = next => { setTab(next); setSubFilter('all'); setSearchQuery(''); };

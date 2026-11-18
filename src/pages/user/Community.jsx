@@ -649,7 +649,61 @@ export default function Community() {
     };
     init();
 
-    // ✨ REALTIME (same listeners as the web): new posts, soft/hard deleted posts, deleted comments
+    // Apply remote comment changes to just one post; avoid full-feed refetches.
+    let realtimeActive = true;
+    let likeTimer;
+    const pendingPostIds = new Set();
+    let syncAllLikes = false;
+    const syncLiveComment = async (commentId) => {
+      if (!commentId) return;
+      const { data: comment } = await supabase.from('community_comments')
+        .select('*, author:user_profiles!community_comments_user_id_fkey(full_name, avatar_url)')
+        .eq('id', commentId).maybeSingle();
+      if (!realtimeActive || !comment) return;
+      const merge = (post) => {
+        if (post.id !== comment.post_id) return post;
+        const comments = [...post.comments.filter((c) => c.id !== comment.id), comment]
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        return { ...post, comments };
+      };
+      setPosts((prev) => prev.map(merge));
+      setCommentModal((prev) => prev ? merge(prev) : prev);
+    };
+    const scheduleLikeSync = (postId) => {
+      if (postId) pendingPostIds.add(postId);
+      else syncAllLikes = true; // DELETE events can omit non-primary-key columns.
+      clearTimeout(likeTimer);
+      likeTimer = setTimeout(async () => {
+        const ids = [...pendingPostIds];
+        const all = syncAllLikes;
+        pendingPostIds.clear();
+        syncAllLikes = false;
+        let query = supabase.from('community_post_likes').select('id, post_id, user_id');
+        if (!all && ids.length) query = query.in('post_id', ids);
+        const { data, error } = await query;
+        if (!realtimeActive || error || !data) return;
+        const grouped = new Map();
+        data.forEach((like) => {
+          if (!grouped.has(like.post_id)) grouped.set(like.post_id, []);
+          grouped.get(like.post_id).push(like);
+        });
+        const touched = new Set(ids);
+        const applyLikes = (post) => {
+          if (!all && !touched.has(post.id)) return post;
+          let likes = grouped.get(post.id) || [];
+          // Do not override an in-flight optimistic heart on this device.
+          const pending = pendingLikesRef.current.get(post.id);
+          if (pending) {
+            likes = likes.filter((l) => l.user_id !== pending.actorId);
+            if (pending.shouldBeLiked) likes.push({ id: `optimistic:${pending.actorId}`, post_id: post.id, user_id: pending.actorId });
+          }
+          if (post.likes.length === likes.length && post.likes.every((l) => likes.some((v) => v.id === l.id))) return post;
+          return { ...post, likes };
+        };
+        setPosts((prev) => prev.map(applyLikes));
+        setCommentModal((prev) => prev ? applyLikes(prev) : prev);
+      }, 300);
+    };
     const channel = supabase.channel(`community_realtime_${Date.now()}`)
       // 1. new post (INSERT)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'community_posts' }, async (payload) => {
@@ -660,7 +714,7 @@ export default function Community() {
             .select('*, author:user_profiles!community_posts_user_id_fkey(full_name, avatar_url, role)')
             .eq('id', payload.new.id)
             .single();
-          if (newPost) {
+          if (newPost && realtimeActive) {
             setPosts((prev) => {
               // skip if it's already there (the author's own post)
               if (prev.some((p) => p.id === newPost.id)) return prev;
@@ -669,29 +723,50 @@ export default function Community() {
           }
         }
       })
-      // 2. post set to is_active = false (soft delete)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'community_posts' }, (payload) => {
-        if (payload.new && payload.new.is_active === false) {
+      // Existing soft-delete behavior + live edits to another user's post.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'community_posts' }, async (payload) => {
+        if (!payload.new?.id) return;
+        if (payload.new.is_active === false) {
           setPosts((prev) => prev.filter((post) => post.id !== payload.new.id));
           setCommentModal((prev) => (prev?.id === payload.new.id ? null : prev));
+          return;
         }
+        const { data: changedPost } = await supabase.from('community_posts')
+          .select('*, author:user_profiles!community_posts_user_id_fkey(full_name, avatar_url, role)')
+          .eq('id', payload.new.id).maybeSingle();
+        if (!changedPost || !realtimeActive) return;
+        setPosts((prev) => prev.map((post) => post.id === changedPost.id
+          ? { ...post, ...changedPost } : post));
+        setCommentModal((prev) => prev?.id === changedPost.id ? { ...prev, ...changedPost } : prev);
       })
       // 3. post deleted for good by a moderator (hard delete)
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'community_posts' }, (payload) => {
         setPosts((prev) => prev.filter((post) => post.id !== payload.old.id));
         setCommentModal((prev) => (prev?.id === payload.old.id ? null : prev));
       })
-      // 4. comment deleted by a moderator
+      // Live comments from other accounts, without reloading the entire photo feed.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'community_comments' }, (payload) => syncLiveComment(payload.new?.id))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'community_comments' }, (payload) => syncLiveComment(payload.new?.id))
+      // 4. deleted comments: change only the affected post/modal.
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'community_comments' }, (payload) => {
-        setPosts((prev) => prev.map((post) => ({
-          ...post,
-          comments: post.comments.filter((c) => c.id !== payload.old.id),
-        })));
-        setCommentModal((prev) => (prev ? { ...prev, comments: prev.comments.filter((c) => c.id !== payload.old.id) } : prev));
+        const deletedId = payload.old?.id;
+        if (!deletedId) return;
+        setPosts((prev) => prev.map((post) => post.comments.some((c) => c.id === deletedId)
+          ? { ...post, comments: post.comments.filter((c) => c.id !== deletedId) } : post));
+        setCommentModal((prev) => prev?.comments.some((c) => c.id === deletedId)
+          ? { ...prev, comments: prev.comments.filter((c) => c.id !== deletedId) } : prev);
       })
+      // For DELETE, PostgreSQL may expose only the primary key (not post_id):
+      // the fallback reconciles likes without reloading posts/images/comments.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'community_post_likes' }, (payload) => scheduleLikeSync(payload.new?.post_id))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'community_post_likes' }, (payload) => scheduleLikeSync(payload.old?.post_id))
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      realtimeActive = false;
+      clearTimeout(likeTimer);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const onRefresh = async () => { setRefreshing(true); await fetchPosts(); setRefreshing(false); };

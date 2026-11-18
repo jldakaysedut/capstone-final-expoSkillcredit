@@ -292,6 +292,12 @@ export default function Payments() {
   useEffect(() => {
     let disposed = false;
     let channel = null;
+    let ledgerTimer;
+    const scheduleLedger = () => {
+      if (disposed) return;
+      clearTimeout(ledgerTimer);
+      ledgerTimer = setTimeout(() => { if (!disposed) void load(); }, 450);
+    };
 
     (async () => {
       await load();
@@ -315,8 +321,11 @@ export default function Payments() {
       }
       if (disposed) return;
       channel = supabase.channel(`payments_live_${uid}_${Date.now()}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'topup_transactions', filter: `user_id=eq.${uid}` }, () => load())
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles', filter: `id=eq.${uid}` }, () => load())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'topup_transactions', filter: `user_id=eq.${uid}` }, scheduleLedger)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles', filter: `id=eq.${uid}` }, scheduleLedger)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reward_claims', filter: `user_id=eq.${uid}` }, scheduleLedger)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `student_id=eq.${uid}` }, scheduleLedger)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `instructor_id=eq.${uid}` }, scheduleLedger)
         .subscribe();
     })();
 
@@ -329,6 +338,7 @@ export default function Payments() {
 
     return () => {
       disposed = true;
+      clearTimeout(ledgerTimer);
       stopPoll();
       creditSub.remove();
       appSub.remove();

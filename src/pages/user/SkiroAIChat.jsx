@@ -7,7 +7,7 @@ import {
   Animated, AppState, Keyboard, Modal, Platform, StyleSheet
 } from 'react-native';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from '../../components/premium/PremiumThemePrimitives';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, BookOpen, CalendarDays, ChevronRight, Coins, History, Plus, Search, Send, Sparkles, Trash2, UserRound, Wallet, X } from '../../components/premium/PremiumThemeIcons';
 import { Alert } from '../../components/SkillCreditAlert';
@@ -457,6 +457,7 @@ export default function SkiroAIChat() {
   const [mode, setMode] = useState('chat');
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
+  const isFocused = useIsFocused();
   const [sending, setSending] = useState(false);
   const [replying, setReplying] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState('');
@@ -504,6 +505,29 @@ export default function SkiroAIChat() {
     void refreshUsage();
     return () => { active = false; };
   }, [refreshUsage]);
+  // Cross-device chat history: merge by message ID so local optimistic UI and
+  // the database INSERT event cannot accidentally duplicate messages.
+  useEffect(() => {
+    if (!userId || loading || !isFocused) return;
+    let usageTimer;
+    const channel = supabase.channel(`skiro_chat_live_${userId}_${Date.now()}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'ai_chat_messages', filter: `user_id=eq.${userId}`,
+      }, (payload) => {
+        const message = payload.new;
+        if (!message?.id || message.user_id !== userId) return;
+        setAllMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
+        clearTimeout(usageTimer);
+        usageTimer = setTimeout(() => { void refreshUsage(); }, 600);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'ai_chat_messages' }, (payload) => {
+        const removedId = payload.old?.id;
+        if (removedId) setAllMessages((prev) => prev.filter((m) => m.id !== removedId));
+      })
+      .subscribe();
+    return () => { clearTimeout(usageTimer); supabase.removeChannel(channel); };
+  }, [userId, loading, isFocused, refreshUsage]);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     const sub = AppState.addEventListener('change', (state) => { if (state === 'active') void refreshUsage(); });
@@ -591,7 +615,7 @@ export default function SkiroAIChat() {
         .insert({ user_id: userId, chat_id: nextId, role: 'user', content: text })
         .select('id, user_id, chat_id, role, content, created_at').single();
       if (insertError) throw insertError;
-      setAllMessages((prev) => [...prev, saved]);
+      setAllMessages((prev) => prev.some((m) => m.id === saved.id) ? prev : [...prev, saved]);
       const { data, error } = await supabase.functions.invoke('skillcredit-ai-chat', {
         body: { mode, message: text, history, message_id: saved.id },
       });
@@ -641,7 +665,7 @@ export default function SkiroAIChat() {
         .insert({ user_id: userId, chat_id: nextId, role: 'assistant', content: pack(answer, cards, links, aiDraft) })
         .select('id, user_id, chat_id, role, content, created_at').single();
       if (saveError) throw saveError;
-      setAllMessages((prev) => [...prev, response]);
+      setAllMessages((prev) => prev.some((m) => m.id === response.id) ? prev : [...prev, response]);
       setReplying(true);
       replyTimer.current = setTimeout(() => setReplying(false), 1450);
     } catch (err) {

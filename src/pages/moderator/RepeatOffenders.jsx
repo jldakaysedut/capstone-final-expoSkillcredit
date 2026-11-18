@@ -37,6 +37,7 @@ export default function RepeatOffenders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentModId, setCurrentModId] = useState(null);
   const lastFetch = useRef(0);
+  const offenderIdsRef = useRef(new Set());
 
   const [activeTabFilter, setActiveTabFilter] = useState('ALL');
   const [manageModal, setManageModal] = useState({ isOpen: false, user: null });
@@ -74,6 +75,7 @@ export default function RepeatOffenders() {
         is_escalated: escalatedIds.has(u.id),
       }));
 
+      offenderIdsRef.current = new Set(combinedData.map((u) => u.id));
       setOffenders(combinedData);
     }
     setLoading(false);
@@ -87,12 +89,21 @@ export default function RepeatOffenders() {
       if (Date.now() - lastFetch.current > 3000) fetchOffenders(true);
     });
     const appSub = AppState.addEventListener('change', (state) => { if (state === 'active') fetchOffenders(true); });
-    const refreshRealtime = () => fetchOffenders(true);
+    let refreshTimer;
+    const refreshRealtime = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => fetchOffenders(true), 450);
+    };
     const liveChannel = supabase.channel('mod_repeatoffenders_live_' + Date.now())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'repeat_offenders' }, refreshRealtime)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, refreshRealtime)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_profiles' }, (payload) => {
+        const u = payload.new;
+        // Ignore unrelated low-strike account edits and wallet/profile churn.
+        if (u && ((u.violation_count || 0) >= STRIKE_LIMIT || offenderIdsRef.current.has(u.id))) refreshRealtime();
+      })
       .subscribe();
-    return () => { unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
+    return () => { clearTimeout(refreshTimer); unsubFocus(); appSub.remove(); supabase.removeChannel(liveChannel); };
   }, [navigation]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchOffenders(true); setRefreshing(false); };
