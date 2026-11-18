@@ -95,8 +95,8 @@ export default function SetupInterests() {
         return;
       }
 
-      // 2. Interests setup must never write wallet credits. Signup's existing
-      // one-time 20 CR bonus is handled by registration/server-side rules.
+      // Starter bonus is assigned on registration; saving interests must not
+      // overwrite an existing wallet balance.
       const { error } = await supabase
         .from('user_profiles')
         .update({

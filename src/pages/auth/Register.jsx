@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Eye, EyeOff, Rocket, MailCheck } from 'lucide-react-native';
 import supabase from '../../supabaseClient';
+import PasswordStrengthMeter, { MIN_PASSWORD_LENGTH } from '../../components/PasswordStrengthMeter';
 
 // Compact X-style layout: open white screen, filled inputs, one primary pill button
 const T = {
@@ -56,6 +57,7 @@ export default function Register() {
     // same as the web form: every field required, email must look like an email
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) return setErrorMsg('Please fill in all fields.');
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setErrorMsg('Please enter a valid email address.');
+    if (password.length < MIN_PASSWORD_LENGTH) return setErrorMsg(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
 
     if (password !== confirmPassword) {
       return setErrorMsg('Passwords do not match');
@@ -137,7 +139,7 @@ export default function Register() {
     }
   };
 
-  const canSubmit = !!fullName.trim() && !!email.trim() && !!password && !!confirmPassword && !loading;
+  const canSubmit = !!fullName.trim() && !!email.trim() && password.length >= MIN_PASSWORD_LENGTH && !!confirmPassword && !loading;
   const eye = (
     <Pressable onPress={() => setShowPw((v) => !v)} hitSlop={10}>
       {showPw ? <EyeOff size={20} color={T.sub} strokeWidth={1.8} /> : <Eye size={20} color={T.sub} strokeWidth={1.8} />}
@@ -241,6 +243,7 @@ export default function Register() {
           onBlur={() => setFocus('')}
           right={eye}
         />
+        <PasswordStrengthMeter password={password} />
 
         <Input
           label="Confirm password"

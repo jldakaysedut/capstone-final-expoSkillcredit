@@ -18,9 +18,9 @@
     },
     "android": {
       "package": "com.anonymous.skillcreditmobile",
-      "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/logo.png"
+       "adaptiveIcon": {
+    "backgroundColor": "#FFFFFF",
+    "foregroundImage": "./assets/android-icon-foreground.png"
       }
     },
     "web": {

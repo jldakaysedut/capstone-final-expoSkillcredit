@@ -2,7 +2,7 @@ import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE APP (Expo React Native) — src/pages/moderator/DisputeDetails.jsx
 //  Same queries, same conflict-of-interest guard, same claim step and the SAME escrow
-//  ruling as the web (secure atomic dispute RPC -> issue_penalty ->
+//  ruling as the web (process_escrow_refund -> session status -> issue_penalty ->
 //  repeat_offenders / admin_escalations (3+ strikes) ->
 //  report update -> mod_logs -> two notifications). Only the presentation changed.
 //  Mobile layout: one column (summary, participants, filed statement, session
@@ -233,25 +233,24 @@ export default function DisputeDetails() {
     const decision = resolutionModal.decision;
     setResolutionModal({ isOpen: false, decision: null });
     setIsProcessing(true);
-    let escrowResolved = false;
+    let payoutCommitted = false;
 
     try {
       const winnerId = decision === 'Learner' ? session.student_id : session.instructor_id;
       const loserId = decision === 'Learner' ? session.instructor_id : session.student_id;
 
       const adjustmentAmount = Number(session.credit_amount || 0);
-      // Payout, report resolution and session outcome all commit in one RPC.
-      const { data: resolution, error: resolutionError } = await supabase.rpc(
+      // One guarded DB transaction pays the winner and resolves session/report.
+      const { data: decisionResult, error: resolveError } = await supabase.rpc(
         'skillcredit_secure_resolve_dispute', {
           p_report_id: report.id,
           p_decision: decision,
         }
       );
-      if (resolutionError) throw resolutionError;
-      // The backend may already have committed even if the response is odd.
-      escrowResolved = true;
-      if (resolution?.state !== 'resolved' || resolution?.awarded !== true) {
-        throw new Error('Dispute response could not be verified. Check the case; do NOT retry the credit payout.');
+      if (resolveError) throw resolveError;
+      payoutCommitted = true;
+      if (decisionResult?.state !== 'resolved' || decisionResult?.awarded !== true) {
+        throw new Error('Dispute status requires verification. Do NOT repeat the payout.');
       }
 
       const autoNote = getDisputeAutoNote(disciplinaryAction);
@@ -296,25 +295,20 @@ export default function DisputeDetails() {
             }
 
             if (disciplinaryAction === 'escalate') {
-              if (!repeatOffenderId) {
-                console.warn('Escalation skipped because repeat offender record was unavailable.');
-              } else {
-                const { error: escalationError } = await supabase
-                  .from('admin_escalations')
-                  .insert([{
-                    repeat_offender_id: repeatOffenderId,
-                    moderator_id: currentUserId,
-                    status: 'pending',
-                  }]);
-                if (escalationError) console.warn('Admin escalation failed:', escalationError);
-              }
+              await supabase
+                .from('admin_escalations')
+                .insert([{
+                  user_id: loserId,
+                  repeat_offender_id: repeatOffenderId,
+                  status: 'pending',
+                }]);
             }
           }
         }
       }
       // ────────────────────────────────────────────────────────
 
-      // RPC already set reports.status = resolved. These are notes only.
+      // Report status was already set to resolved by the secure RPC.
       const updatedDetails = `${report.details}\n\n[RESOLVED - FAVOR ${decision.toUpperCase()} on ${timestamp}]: ${autoNote}`;
 
       const { error: reportUpdateErr } = await supabase.from('reports').update({ details: updatedDetails, mod_action_notes: autoNote }).eq('id', report.id);
@@ -359,12 +353,12 @@ export default function DisputeDetails() {
       Alert.alert(`Dispute successfully closed in favor of the ${decision}. Action executed.`);
       goQueue();
     } catch (err) {
-      console.error('Dispute resolution failed:', err);
-      if (escrowResolved) {
-        Alert.alert('Payout already processed', 'Credits and report status were already processed. Some follow-up action may be incomplete. Do NOT retry the payout. Check the case. ' + (err?.message || ''));
+      console.error(err);
+      if (payoutCommitted) {
+        Alert.alert('Dispute payout was already processed. A follow-up action may have failed. Do NOT retry. Review the case or contact an administrator.');
         goQueue();
       } else {
-        Alert.alert('Error finalizing verdict: ' + (err?.message || 'Unknown error'));
+        Alert.alert('Error finalizing verdict: ' + err.message);
       }
     } finally {
       setIsProcessing(false);

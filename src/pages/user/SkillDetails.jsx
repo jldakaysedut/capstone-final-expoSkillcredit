@@ -148,7 +148,7 @@ export default function SkillDetails() {
         }
         const { data: sessionData } = await supabase.from('sessions').select('status, id')
           .eq('skill_id', id).eq('student_id', user.id)
-          .in('status', ['pending', 'active', 'upcoming', 'confirmed']).limit(1);
+          .in('status', ['pending', 'reschedule_proposed', 'active', 'upcoming', 'confirmed']).limit(1);
         setExistingSession(sessionData && sessionData.length > 0 ? sessionData[0] : null);
       }
 
@@ -220,9 +220,9 @@ export default function SkillDetails() {
     }
 
     try {
-      // Server checks availability/price, atomically debits the learner and creates
-      // the booking. Never write credits_balance from this screen after success.
-      const { data: bookedRows, error: bookingError } = await supabase.rpc(
+      // Secure server-side booking creates the session and deducts credits
+      // atomically. Never write credits_balance directly from Expo.
+      const { data: resultRows, error: bookingRpcError } = await supabase.rpc(
         'skillcredit_secure_book_session', {
           p_skill_id: skill.id,
           p_scheduled_date: preferredDate,
@@ -230,19 +230,17 @@ export default function SkillDetails() {
           p_message: bookingMessage.trim(),
         }
       );
-      if (bookingError) throw bookingError;
-      const booked = Array.isArray(bookedRows) ? bookedRows[0] : bookedRows;
+      if (bookingRpcError) throw bookingRpcError;
+      const booked = Array.isArray(resultRows) ? resultRows[0] : resultRows;
       if (!booked?.session_id || !Number.isInteger(booked?.remaining_credits)) {
-        throw new Error('Booking response could not be verified. Check Sessions before trying again to prevent duplicate bookings.');
+        throw new Error('Could not verify the booking result. Check My Sessions before retrying.');
       }
       const newSession = { id: booked.session_id };
       const newBalance = booked.remaining_credits;
       const bookedCost = booked.credit_amount;
-      // The financial transaction is finished at this point. Chat/notification
-      // failures must not turn it into an apparent failed booking.
+
       DeviceEventEmitter.emit('credit_updated');
       setCurrentUserCredits(newBalance);
-      setExistingSession({ id: newSession.id, status: 'pending' });
       setBookedSessionId(newSession.id);
       setBookingSuccess(true);
 
@@ -256,8 +254,8 @@ export default function SkillDetails() {
         userMsg: bookingMessage.trim(),
       })}`;
 
-      // Non-financial side effects: report their failures, but never retry the
-      // successful booking RPC because of a failed message or notification.
+      // Non-financial side effects are best-effort; a notification failure must
+      // never make an already-paid booking look like it failed.
       try {
         const { error: msgError } = await supabase.from('messages').insert([{
           session_id: newSession.id,
@@ -266,21 +264,24 @@ export default function SkillDetails() {
           content: bookingSysContent,
           is_deleted: false,
         }]);
-        if (msgError) console.warn('Failed to save initial booking message:', msgError);
-      } catch (msgError) { console.warn('Failed to save initial booking message:', msgError); }
+        if (msgError) console.error('Failed to save initial message:', msgError);
+      } catch (messageError) {
+        console.error('Failed to save initial booking message:', messageError);
+      }
 
       try {
-        const { error: notificationError } = await supabase.from('notifications').insert([{
-          user_id: skill.instructor_id,
-          type: 'booking',
+        const { error: noticeError } = await supabase.from('notifications').insert([{
+          user_id: skill.instructor_id, type: 'booking',
           content: `New booking request for "${skill.title}" worth ${bookedCost} CR.`,
           link_url: `/sessions?session=${newSession.id}`,
         }]);
-        if (notificationError) console.warn('Failed to save booking notification:', notificationError);
-      } catch (noticeError) { console.warn('Failed to save booking notification:', noticeError); }
+        if (noticeError) console.error('Failed to notify teacher of booking:', noticeError);
+      } catch (noticeError) {
+        console.error('Failed to notify teacher of booking:', noticeError);
+      }
     } catch (error) {
       console.error(error);
-      setBookingError(error?.message || 'Booking could not be completed. Check Sessions before trying again.');
+      setBookingError(error?.message || 'Something went wrong while booking. Please check My Sessions before retrying.');
     } finally { setBookingLoading(false); }
   };
 

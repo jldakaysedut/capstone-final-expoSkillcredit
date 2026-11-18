@@ -9,6 +9,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { User, ChevronRight, Eye, EyeOff, AlertTriangle, Trash2, CheckCircle2, Moon, Sun } from '../../components/premium/PremiumThemeIcons';
 import supabase from '../../supabaseClient';
+import PasswordStrengthMeter, { MIN_PASSWORD_LENGTH } from '../../components/PasswordStrengthMeter';
 import UserScreenSkeleton from '../../components/premium/UserScreenSkeleton';
 import { useUserTheme } from '../../components/premium/PremiumTheme';
 
@@ -46,7 +47,7 @@ export default function Settings() {
 
   const handlePasswordUpdate = async () => {
     setPasswordMessage({ type: '', text: '' });
-    if (newPassword.length < 6) return setPasswordMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) return setPasswordMessage({ type: 'error', text: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
     if (newPassword !== confirmPassword) return setPasswordMessage({ type: 'error', text: 'Passwords do not match.' });
 
     Keyboard.dismiss();
@@ -108,7 +109,7 @@ export default function Settings() {
 
   if (loading) return <UserScreenSkeleton type="settings" />;
 
-  const canSubmitPw = !!newPassword && !isUpdatingPassword;
+  const canSubmitPw = newPassword.length >= MIN_PASSWORD_LENGTH && !!confirmPassword && !isUpdatingPassword;
 
   return (
     <>
@@ -131,9 +132,10 @@ export default function Settings() {
           <Text style={s.label}>New password</Text>
           <View style={s.inputWrap}>
             <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry={!showPw} autoCapitalize="none" autoCorrect={false}
-              placeholder="At least 6 characters" placeholderTextColor="#9ca3af" style={s.inputFlex} />
+              placeholder="At least 8 characters" placeholderTextColor="#9ca3af" style={s.inputFlex} />
             <Pressable onPress={() => setShowPw((v) => !v)} hitSlop={10}>{showPw ? <EyeOff size={20} color="#6b7280" /> : <Eye size={20} color="#6b7280" />}</Pressable>
           </View>
+          <PasswordStrengthMeter password={newPassword} />
 
           <Text style={[s.label, { marginTop: 14 }]}>Confirm new password</Text>
           <View style={s.inputWrap}>

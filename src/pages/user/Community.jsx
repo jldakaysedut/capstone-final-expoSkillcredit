@@ -7,7 +7,7 @@ import { Alert } from '../../components/SkillCreditAlert';
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Modal, RefreshControl, Platform, useWindowDimensions, StyleSheet
+  Modal, FlatList, RefreshControl, Platform, useWindowDimensions, StyleSheet
 } from 'react-native';
 import { ActivityIndicator, View, Text, TextInput, Image, Pressable, ScrollView, KeyboardAvoidingView } from '../../components/premium/PremiumThemePrimitives';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -528,8 +528,8 @@ export default function Community() {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
-  const feedY = useRef(0);
-  const postYs = useRef({});
+  const focusScrollAttemptsRef = useRef(0);
+  const focusRetryTimerRef = useRef(null);
 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
@@ -594,9 +594,21 @@ export default function Community() {
       .order('created_at', { ascending: true });
     const { data: likesData } = await supabase.from('community_post_likes').select('*');
     if (postsData) {
+      // Group each comment/like once instead of re-scanning every row for
+      // every post. The same Supabase queries, sorting and optimistic hearts remain.
+      const commentsByPost = new Map();
+      for (const comment of commentsData || []) {
+        if (!commentsByPost.has(comment.post_id)) commentsByPost.set(comment.post_id, []);
+        commentsByPost.get(comment.post_id).push(comment);
+      }
+      const likesByPost = new Map();
+      for (const like of likesData || []) {
+        if (!likesByPost.has(like.post_id)) likesByPost.set(like.post_id, []);
+        likesByPost.get(like.post_id).push(like);
+      }
       const enriched = postsData.map((p) => {
         const pending = pendingLikesRef.current.get(p.id);
-        const serverLikes = (likesData || []).filter((l) => l.post_id === p.id);
+        const serverLikes = likesByPost.get(p.id) || [];
         const likes = pending
           ? (pending.shouldBeLiked
             ? [...serverLikes.filter((l) => l.user_id !== pending.actorId), { id: `optimistic:${pending.actorId}`, post_id: p.id, user_id: pending.actorId }]
@@ -604,7 +616,7 @@ export default function Community() {
           : serverLikes;
         return {
           ...p,
-          comments: (commentsData || []).filter((c) => c.post_id === p.id),
+          comments: commentsByPost.get(p.id) || [],
           likes,
         };
       });
@@ -987,12 +999,17 @@ export default function Community() {
     setHighlightedPostId(focusPostId);
     if (focusCommentId) setCommentModal(targetPost);
 
+    const focusIndex = filteredPosts.findIndex((p) => p.id === focusPostId);
+    focusScrollAttemptsRef.current = 0;
     const focusTimer = setTimeout(() => {
-      const y = feedY.current + (postYs.current[focusPostId] || 0);
-      scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+      if (focusIndex >= 0) scrollRef.current?.scrollToIndex({ index: focusIndex, viewPosition: 0.06, animated: true });
     }, 250);
     const highlightTimer = setTimeout(() => setHighlightedPostId(null), 3500);
-    return () => { clearTimeout(focusTimer); clearTimeout(highlightTimer); };
+    return () => {
+      clearTimeout(focusTimer);
+      clearTimeout(highlightTimer);
+      if (focusRetryTimerRef.current) clearTimeout(focusRetryTimerRef.current);
+    };
   }, [focusPostId, focusCommentId, filteredPosts, loading, posts]);
 
   const renderContentWithTags = (content) =>
@@ -1007,126 +1024,152 @@ export default function Community() {
   const clearFilters = () => { setSearchQuery(''); setSelectedCategory('All'); setSelectedPostType('All'); };
   const isEditMode = composer.mode === 'edit';
 
-  return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={{ paddingBottom: 140 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
-      >
-        {/* composer + filter + post-type chips */}
-        <Reveal delay={90}><View style={s.topBlock}>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <PressScale onPress={openCreate} style={s.composerPill}>
-              <Text style={s.composerText} numberOfLines={1}>What's on your mind?</Text>
-              <ImagePlus size={18} color={T.brand} />
-            </PressScale>
-            <Pressable onPress={() => setFilterOpen(true)} style={[s.filterBtn, hasFilters && { backgroundColor: T.soft }]}>
-              <SlidersHorizontal size={20} color={hasFilters ? T.brand : T.text} />
+  // Virtualized posts: mount only visible/nearby rows and their photo collages.
+  // All original menus, hashtags, optimistic likes, comments and profile links remain.
+  const renderPost = ({ item: post }) => {
+    const isLiked = post.likes.some((like) => like.user_id === currentUserId);
+    const isLong = (post.content?.length || 0) > 240 || (post.content?.split('\n').length || 0) > 5;
+    const isOpen = !!expandedPosts[post.id];
+    return (
+      <View style={[s.post, highlightedPostId === post.id && s.postHighlight]}>
+
+        <Pressable onPress={() => navigation.navigate('PublicProfile', { id: post.user_id })}>
+          <Avatar src={post.author?.avatar_url} name={post.author?.full_name} size={40} />
+        </Pressable>
+
+        <View style={{ flex: 1 }}>
+          <View style={s.postHead}>
+            <Text onPress={() => navigation.navigate('PublicProfile', { id: post.user_id })}
+              style={s.postName} numberOfLines={1}>
+              {post.author?.full_name || 'Community member'}
+            </Text>
+            <Text style={s.postTime}>· {timeShort(post.created_at)}</Text>
+            <Pressable onPress={() => openPostMenu(post)} style={s.moreBtn} hitSlop={8}>
+              <MoreHorizontal size={18} color={T.sub} />
             </Pressable>
           </View>
+          {!!post.post_type && <Text style={s.postType} numberOfLines={1}>{post.post_type}</Text>}
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12 }}>
-            {['All', 'My Post', ...POST_TYPES].map((type) => (
-              <Pressable key={type} onPress={() => setSelectedPostType(type)}
-                style={[s.chip, selectedPostType === type && s.chipOn]}>
-                <Text style={[s.chipText, selectedPostType === type && { color: '#fff' }]}>{type}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          {hasFilters && (
-            <View style={s.activeRow}>
-              {!!searchQuery && (
-                <Pressable onPress={() => setSearchQuery('')} style={s.activeChip}>
-                  <Text style={s.activeChipText} numberOfLines={1}>“{searchQuery}”</Text>
-                  <X size={14} color="#065f46" />
-                </Pressable>
-              )}
-              {selectedCategory !== 'All' && (
-                <Pressable onPress={() => setSelectedCategory('All')} style={s.activeChip}>
-                  <Text style={s.activeChipText} numberOfLines={1}>{selectedCategory}</Text>
-                  <X size={14} color="#065f46" />
+          {!!post.content && (
+            <View style={{ marginTop: 4 }}>
+              <Text style={s.postText} numberOfLines={isLong && !isOpen ? 5 : undefined}>
+                {renderContentWithTags(post.content)}
+              </Text>
+              {isLong && (
+                <Pressable onPress={() => setExpandedPosts((p) => ({ ...p, [post.id]: !p[post.id] }))} hitSlop={6}>
+                  <Text style={s.seeMore}>{isOpen ? 'See less' : 'See more'}</Text>
                 </Pressable>
               )}
             </View>
           )}
-        </View></Reveal>
 
-        {/* FEED */}
-        <View style={{ borderTopWidth: 1, borderTopColor: T.line }} onLayout={(e) => { feedY.current = e.nativeEvent.layout.y; }}>
-          {filteredPosts.length === 0 ? (
-            <View style={s.empty}>
-              <Inbox size={40} color={T.border} />
-              <Text style={s.emptyTitle}>{posts.length ? 'No posts found' : 'No posts yet'}</Text>
-              <Text style={s.emptySub}>{posts.length ? 'Try a different filter.' : 'Be the first to share something.'}</Text>
-              <PressScale onPress={posts.length ? clearFilters : openCreate} style={s.fillBtn}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{posts.length ? 'Clear filters' : 'Create post'}</Text>
-              </PressScale>
-            </View>
-          ) : filteredPosts.map((post) => {
-            const isLiked = post.likes.some((like) => like.user_id === currentUserId);
-            const isLong = (post.content?.length || 0) > 240 || (post.content?.split('\n').length || 0) > 5;
-            const isOpen = !!expandedPosts[post.id];
-            return (
-              <View key={post.id}
-                onLayout={(e) => { postYs.current[post.id] = e.nativeEvent.layout.y; }}
-                style={[s.post, highlightedPostId === post.id && s.postHighlight]}>
+          {post.media_urls?.length > 0 && (
+            <PostImageCollage mediaUrls={post.media_urls} onOpen={(imgs, i) => setImageGallery({ images: imgs, index: i })} />
+          )}
 
-                <Pressable onPress={() => navigation.navigate('PublicProfile', { id: post.user_id })}>
-                  <Avatar src={post.author?.avatar_url} name={post.author?.full_name} size={40} />
-                </Pressable>
-
-                <View style={{ flex: 1 }}>
-                  <View style={s.postHead}>
-                    <Text onPress={() => navigation.navigate('PublicProfile', { id: post.user_id })}
-                      style={s.postName} numberOfLines={1}>
-                      {post.author?.full_name || 'Community member'}
-                    </Text>
-                    <Text style={s.postTime}>· {timeShort(post.created_at)}</Text>
-                    <Pressable onPress={() => openPostMenu(post)} style={s.moreBtn} hitSlop={8}>
-                      <MoreHorizontal size={18} color={T.sub} />
-                    </Pressable>
-                  </View>
-                  {!!post.post_type && <Text style={s.postType} numberOfLines={1}>{post.post_type}</Text>}
-
-                  {!!post.content && (
-                    <View style={{ marginTop: 4 }}>
-                      <Text style={s.postText} numberOfLines={isLong && !isOpen ? 5 : undefined}>
-                        {renderContentWithTags(post.content)}
-                      </Text>
-                      {isLong && (
-                        <Pressable onPress={() => setExpandedPosts((p) => ({ ...p, [post.id]: !p[post.id] }))} hitSlop={6}>
-                          <Text style={s.seeMore}>{isOpen ? 'See less' : 'See more'}</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
-
-                  {post.media_urls?.length > 0 && (
-                    <PostImageCollage mediaUrls={post.media_urls} onOpen={(imgs, i) => setImageGallery({ images: imgs, index: i })} />
-                  )}
-
-                  <View style={s.actions}>
-                    <Pressable onPress={() => toggleLike(post.id)} style={s.actionBtn} hitSlop={8}>
-                      <Heart size={18} color={isLiked ? T.danger : T.sub} fill={isLiked ? T.danger : 'none'} />
-                      {post.likes.length > 0 && (
-                        <Text style={[s.actionCount, isLiked && { color: T.danger }]}>{post.likes.length}</Text>
-                      )}
-                    </Pressable>
-                    <Pressable onPress={() => setCommentModal(post)} style={s.actionBtn} hitSlop={8}>
-                      <MessageSquare size={18} color={T.sub} />
-                      {post.comments.length > 0 && <Text style={s.actionCount}>{post.comments.length}</Text>}
-                    </Pressable>
-                  </View>
-                </View>
-              </View>
-            );
-          })}
+          <View style={s.actions}>
+            <Pressable onPress={() => toggleLike(post.id)} style={s.actionBtn} hitSlop={8}>
+              <Heart size={18} color={isLiked ? T.danger : T.sub} fill={isLiked ? T.danger : 'none'} />
+              {post.likes.length > 0 && (
+                <Text style={[s.actionCount, isLiked && { color: T.danger }]}>{post.likes.length}</Text>
+              )}
+            </Pressable>
+            <Pressable onPress={() => setCommentModal(post)} style={s.actionBtn} hitSlop={8}>
+              <MessageSquare size={18} color={T.sub} />
+              {post.comments.length > 0 && <Text style={s.actionCount}>{post.comments.length}</Text>}
+            </Pressable>
+          </View>
         </View>
-      </ScrollView>
+      </View>
+    );
+  };
+
+  // A post linked from a notification can be far beyond the initial window.
+  // RN can't measure offscreen variable-height rows, so advance to its region
+  // and retry a bounded number of times until scrollToIndex can resolve it.
+  const handleScrollToIndexFailed = ({ index, averageItemLength }) => {
+    if (focusScrollAttemptsRef.current >= 3) return;
+    focusScrollAttemptsRef.current += 1;
+    scrollRef.current?.scrollToOffset({
+      offset: Math.max(0, index * (averageItemLength || 220)), animated: false,
+    });
+    if (focusRetryTimerRef.current) clearTimeout(focusRetryTimerRef.current);
+    focusRetryTimerRef.current = setTimeout(() => {
+      scrollRef.current?.scrollToIndex({ index, viewPosition: 0.06, animated: true });
+    }, 200);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      <FlatList
+        ref={scrollRef}
+        data={filteredPosts}
+        keyExtractor={(post) => post.id}
+        renderItem={renderPost}
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        contentContainerStyle={{ paddingBottom: 140 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} colors={[T.brand]} />}
+        onScrollToIndexFailed={handleScrollToIndexFailed}
+        ListHeaderComponent={
+          <>
+            {/* composer + filter + post-type chips */}
+            <Reveal delay={90}><View style={s.topBlock}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <PressScale onPress={openCreate} style={s.composerPill}>
+                  <Text style={s.composerText} numberOfLines={1}>What's on your mind?</Text>
+                  <ImagePlus size={18} color={T.brand} />
+                </PressScale>
+                <Pressable onPress={() => setFilterOpen(true)} style={[s.filterBtn, hasFilters && { backgroundColor: T.soft }]}>
+                  <SlidersHorizontal size={20} color={hasFilters ? T.brand : T.text} />
+                </Pressable>
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12 }}>
+                {['All', 'My Post', ...POST_TYPES].map((type) => (
+                  <Pressable key={type} onPress={() => setSelectedPostType(type)}
+                    style={[s.chip, selectedPostType === type && s.chipOn]}>
+                    <Text style={[s.chipText, selectedPostType === type && { color: '#fff' }]}>{type}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {hasFilters && (
+                <View style={s.activeRow}>
+                  {!!searchQuery && (
+                    <Pressable onPress={() => setSearchQuery('')} style={s.activeChip}>
+                      <Text style={s.activeChipText} numberOfLines={1}>“{searchQuery}”</Text>
+                      <X size={14} color="#065f46" />
+                    </Pressable>
+                  )}
+                  {selectedCategory !== 'All' && (
+                    <Pressable onPress={() => setSelectedCategory('All')} style={s.activeChip}>
+                      <Text style={s.activeChipText} numberOfLines={1}>{selectedCategory}</Text>
+                      <X size={14} color="#065f46" />
+                    </Pressable>
+                  )}
+                </View>
+              )}
+            </View></Reveal>
+
+            <View style={{ borderTopWidth: 1, borderTopColor: T.line }} />
+          </>
+        }
+        ListEmptyComponent={
+                <View style={s.empty}>
+                  <Inbox size={40} color={T.border} />
+                  <Text style={s.emptyTitle}>{posts.length ? 'No posts found' : 'No posts yet'}</Text>
+                  <Text style={s.emptySub}>{posts.length ? 'Try a different filter.' : 'Be the first to share something.'}</Text>
+                  <PressScale onPress={posts.length ? clearFilters : openCreate} style={s.fillBtn}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{posts.length ? 'Clear filters' : 'Create post'}</Text>
+                  </PressScale>
+                </View>
+        }
+      />
 
       {/* FILTER SHEET: search, topic, trending */}
       <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>

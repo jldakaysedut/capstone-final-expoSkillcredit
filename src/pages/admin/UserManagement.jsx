@@ -118,7 +118,6 @@ export default function UserManagement() {
   const [roleFilterOpen, setRoleFilterOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const debounceRef = useRef(null);
-  const creditAdjustInFlightRef = useRef(false);
 
   // ════ DATA LOGIC: identical to the web (silent only skips the loading state on refresh) ════
   const fetchUsers = useCallback(async (silent = false) => {
@@ -186,20 +185,20 @@ export default function UserManagement() {
   };
 
   const handleCreditAdjust = async user => {
-    if (creditAdjustInFlightRef.current || savingUserId) return;
-    const parsedAmount = Number.parseInt(creditAmount, 10);
-    if (!creditAmount.trim() || !Number.isFinite(parsedAmount) || parsedAmount === 0) {
-      setCreditError('Enter a whole number other than zero. Use a negative number to deduct credits.');
+    if (savingUserId) return;
+    const input = creditAmount.trim();
+    const parsedAmount = Number(input);
+    if (!/^[+-]?\d+$/.test(input) || !Number.isSafeInteger(parsedAmount) ||
+        parsedAmount === 0 || parsedAmount < -2147483648 || parsedAmount > 2147483647) {
+      setCreditError('Enter a non-zero whole number within the allowed range. Use a negative number to deduct.');
       return;
     }
 
-    creditAdjustInFlightRef.current = true;
     setSavingUserId(user.id);
     setCreditError('');
     setNotice('');
     try {
-      // The Admin-only RPC checks authorization, locks the wallet and writes
-      // CREDIT_ADJUST admin_logs atomically. Do not log a second time here.
+      // Atomic, authorized credit adjustment and one Admin audit log on server.
       const { data, error } = await supabase.rpc('skillcredit_admin_adjust_credits', {
         p_target_user_id: user.id,
         p_delta: parsedAmount,
@@ -207,24 +206,28 @@ export default function UserManagement() {
       if (error) throw error;
       if (data?.state !== 'adjusted' || data?.target_user_id !== user.id ||
           !Number.isInteger(data?.new_balance)) {
-        throw new Error('Adjustment result could not be verified. Refresh the user before retrying.');
+        throw new Error('Adjustment result unconfirmed. Refresh wallet balance before attempting again.');
       }
       const newBalance = data.new_balance;
       updateLocalUser(user.id, { credits_balance: newBalance });
+      // Do not write a duplicate CREDIT_ADJUST admin log: RPC logged this change.
       const actionWord = parsedAmount >= 0 ? 'added to' : 'deducted from';
-      const { error: notificationError } = await supabase.from('notifications').insert({
-        user_id: user.id,
-        type: 'system_alert',
-        content: `Admin has ${actionWord} your account by ${Math.abs(parsedAmount)} credits. Your new balance is ${newBalance} CR.`,
-      });
-      if (notificationError) console.warn('Admin credit notification failed:', notificationError);
-      setNotice(`Credits updated for ${userName(user)}. New balance: ${formatNumber(newBalance)} CR.${notificationError ? ' Notification failed.' : ''}`);
+      try {
+        const { error: noticeError } = await supabase.from('notifications').insert({
+          user_id: user.id,
+          type: 'system_alert',
+          content: `Admin has ${actionWord} your account by ${Math.abs(parsedAmount)} credits. Your new balance is ${newBalance} CR.`,
+        });
+        if (noticeError) console.warn('Credit adjusted, but notification failed:', noticeError);
+      } catch (noticeError) {
+        console.warn('Credit adjusted, but notification failed:', noticeError);
+      }
+      setNotice(`Credits updated for ${userName(user)}. New balance: ${formatNumber(newBalance)} CR.`);
       closeModal();
     } catch (error) {
-      console.error('Admin credit adjustment failed:', error);
-      setCreditError(error?.message || 'Cannot verify wallet update. Refresh before retrying to prevent duplicate credits.');
+      console.error('Admin credit adjustment could not be verified:', error);
+      setCreditError('Could not confirm the adjustment. Verify current balance before retrying to prevent duplicates.');
     } finally {
-      creditAdjustInFlightRef.current = false;
       setSavingUserId(null);
     }
   };

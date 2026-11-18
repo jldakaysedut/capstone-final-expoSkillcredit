@@ -70,13 +70,6 @@ function getSafeDateObj(dateStr, timeStr) {
   return new Date(year, month - 1, day, hours, minutes);
 }
 
-// The booking RPC validates time in Asia/Manila, regardless of device timezone.
-function isScheduleExpired(dateStr, timeStr) {
-  if (!dateStr || !timeStr) return false;
-  const timestamp = Date.parse(`${dateStr}T${String(timeStr).slice(0, 5)}:00+08:00`);
-  return Number.isFinite(timestamp) && Date.now() > timestamp;
-}
-
 function getGroup(dateStr, timeStr) {
   const now = new Date();
   const date = getSafeDateObj(dateStr, timeStr);
@@ -301,23 +294,22 @@ export default function Sessions() {
     setProcessingId(session.id);
     try {
       if (action === 'cancel' || action === 'decline' || action === 'cancel_no_show') {
-        // Atomic server-side refund and cancellation; prevents split writes and
-        // duplicate credits on retries or repeated taps.
+        // Secure cancellation and credit refund happen in one DB transaction.
         const { data: cancellationResult, error: cancellationError } = await supabase.rpc(
           'skillcredit_secure_cancel_session', { p_session_id: session.id, p_action: action }
         );
         if (cancellationError) throw cancellationError;
         if (cancellationResult?.state === 'already_cancelled') {
-          throw new Error('This booking was already cancelled. Check the learner wallet before taking any further action.');
+          throw new Error('This session was already cancelled. Check credits before trying again.');
         }
         if (cancellationResult?.state !== 'cancelled' || cancellationResult?.refunded !== true) {
-          throw new Error('Cancellation result could not be verified. Check Sessions before retrying.');
+          throw new Error('Cancellation outcome unconfirmed. Check Sessions before retrying.');
         }
         DeviceEventEmitter.emit('credit_updated');
 
         // Notify the other participant only after the existing cancellation update succeeds.
         // Keep the existing credit refund and no-show behavior unchanged.
-        if (action === 'cancel' || action === 'decline') {
+        if (!cancellationError && (action === 'cancel' || action === 'decline')) {
           const actorIsInstructor = session.instructor_id === currentUserId;
           const otherId = actorIsInstructor ? session.student_id : session.instructor_id;
           const actor = actorIsInstructor
@@ -361,29 +353,35 @@ export default function Sessions() {
           }]);
         }
       } else if (action === 'accept_schedule') {
-        // Refetch immediately before status change; stale buttons can outlive
-        // the scheduled time while the app is open.
-        const { data: freshSession, error: freshSessionError } = await supabase.from('sessions')
-          .select('status, scheduled_date, scheduled_time').eq('id', session.id).single();
-        if (freshSessionError || !freshSession) throw freshSessionError || new Error('Session unavailable.');
-        if (!['pending', 'reschedule_proposed'].includes(freshSession.status) ||
-            isScheduleExpired(freshSession.scheduled_date, freshSession.scheduled_time)) {
-          throw new Error('This schedule has expired or changed. Manage the booking for refund options.');
-        }
-        const { error: confirmError } = await supabase.from('sessions').update({ status: 'upcoming' })
-          .eq('id', session.id).eq('status', freshSession.status);
+        // Already-installed shared RPC validates actor, expiry, status, and
+        // locks the row. Do not insert duplicate confirmation notifications.
+        const { data: confirmation, error: confirmError } = await supabase.rpc(
+          'skillcredit_secure_confirm_schedule', { p_session_id: session.id }
+        );
         if (confirmError) throw confirmError;
+        if (confirmation?.state === 'already_confirmed') {
+          await fetchSessions(currentUserId);
+          return;
+        }
+        if (confirmation?.state !== 'confirmed') {
+          throw new Error('Schedule confirmation unconfirmed. Refresh Sessions before retrying.');
+        }
 
         const isInstructorAction = session.instructor_id === currentUserId;
         const targetUserId = isInstructorAction ? session.student_id : session.instructor_id;
         const actorName = isInstructorAction ? session.instructor?.full_name || 'The teacher' : session.student?.full_name || 'The learner';
 
-        await supabase.from('notifications').insert([{
-          user_id: targetUserId,
-          type: 'booking_accepted',
-          content: `${actorName} has confirmed the schedule for the session. It is now upcoming!`,
-          link_url: `/sessions?session=${session.id}`,
-        }]);
+        try {
+          const { error: noticeError } = await supabase.from('notifications').insert([{
+            user_id: targetUserId,
+            type: 'booking_accepted',
+            content: `${actorName} has confirmed the schedule for the session. It is now upcoming!`,
+            link_url: `/sessions?session=${session.id}`,
+          }]);
+          if (noticeError) console.error('Schedule confirmed but notification failed:', noticeError);
+        } catch (noticeError) {
+          console.error('Schedule confirmed but notification failed:', noticeError);
+        }
       } else if (action === 'start_session') {
         const now = new Date();
         const dateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
@@ -461,10 +459,7 @@ export default function Sessions() {
         }
       }
       fetchSessions(currentUserId);
-    } catch (err) {
-      console.error('Session action failed:', err);
-      Alert.alert('Session action', err?.message || 'The action could not be verified. Refresh Sessions before retrying.');
-    }
+    } catch (err) { console.error(err.message); Alert.alert('Error', 'Error processing transaction.'); }
     finally { setProcessingId(null); }
   };
 
@@ -577,7 +572,7 @@ export default function Sessions() {
     const sessionDateObj = getSafeDateObj(session.scheduled_date, session.scheduled_time);
     const durationMs = parseDurationToMs(session.skill?.duration);
     const isSessionFinished = Date.now() > sessionDateObj.getTime() + durationMs;
-    const isExpired = isScheduleExpired(session.scheduled_date, session.scheduled_time);
+    const isExpired = Date.now() > sessionDateObj.getTime();
     const isNoShow = Date.now() > sessionDateObj.getTime() + 30 * 60 * 1000;
 
     const actions = [];
@@ -592,34 +587,28 @@ export default function Sessions() {
     if (st === 'pending') {
       if (isExpired) hint = '⏰ Schedule expired';
       if (isInstructor) {
-        if (isExpired) {
-          add('Return Credit', () => askThenRun('Return Credit', 'Schedule expired. Return credits to the learner and cancel this booking?', session, 'decline', 'Return Credit', false), 'greenSoft', RefreshCw);
-        } else {
-          add('Confirm schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
-          add('Propose new time', openPropose, 'soft');
-          add('Decline', () => askThenRun('Decline', 'Decline?', session, 'decline', 'Decline'), 'danger');
-        }
+        if (!isExpired) add('Confirm schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
+        if (!isExpired) add('Propose new time', openPropose, 'soft');
+        add(isExpired ? 'Return credit' : 'Decline',
+          () => askThenRun(isExpired ? 'Return credit' : 'Decline',
+            isExpired ? 'Expired booking. Return the credits to the learner?' : 'Decline?',
+            session, 'decline', isExpired ? 'Return credit' : 'Decline'), 'danger');
       } else if (!isExpired) {
         add('Cancel & refund', () => askThenRun('Cancel', 'Cancel?', session, 'cancel', 'Cancel booking'), 'danger');
       } else {
         add('Claim refund', () => askThenRun('Claim refund', 'Session expired. Cancel to refund?', session, 'cancel', 'Refund', false), 'greenSoft', RefreshCw);
       }
     } else if (st === 'reschedule_proposed') {
-      if (isExpired) hint = '⏰ Proposed schedule expired';
       if (isInstructor) {
-        if (isExpired) {
-          add('Return Credit', () => askThenRun('Return Credit', 'Proposed schedule expired. Return credits to the learner and cancel this booking?', session, 'decline', 'Return Credit', false), 'greenSoft', RefreshCw);
-        } else {
-          hint = '⏳ Waiting for the learner to confirm the new time';
-          add('Edit proposed time', openPropose, 'purple');
-          add('Decline', () => askThenRun('Decline', 'Cancel booking entirely?', session, 'decline', 'Decline'), 'danger');
-        }
-      } else if (isExpired) {
-        add('Claim Refund', () => askThenRun('Claim Refund', 'Proposed schedule expired. Claim your booking credits back?', session, 'cancel', 'Claim Refund', false), 'greenSoft', RefreshCw);
+        hint = isExpired ? '⏰ Proposed schedule expired' : '⏳ Waiting for the learner to confirm the new time';
+        if (!isExpired) add('Edit proposed time', openPropose, 'purple');
+        add(isExpired ? 'Return credit' : 'Decline',
+          () => askThenRun(isExpired ? 'Return credit' : 'Decline', 'Cancel booking and return learner credits?', session, 'decline', isExpired ? 'Return credit' : 'Decline'), 'danger');
       } else {
-        hint = '📅 The teacher proposed a new schedule';
-        add('Accept schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
-        add('Cancel & refund', () => askThenRun('Cancel', 'Decline and cancel session?', session, 'cancel', 'Cancel session'), 'danger');
+        hint = isExpired ? '⏰ Proposed schedule expired' : '📅 The teacher proposed a new schedule';
+        if (!isExpired) add('Accept schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
+        add(isExpired ? 'Claim refund' : 'Cancel & refund',
+          () => askThenRun(isExpired ? 'Claim refund' : 'Cancel', 'Cancel and refund this booking?', session, 'cancel', isExpired ? 'Claim refund' : 'Cancel session', false), isExpired ? 'greenSoft' : 'danger');
       }
     } else if (st === 'upcoming') {
       if (isInstructor) {

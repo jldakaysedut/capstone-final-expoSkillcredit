@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Eye, EyeOff, LockKeyhole } from 'lucide-react-native';
 import supabase from '../../supabaseClient';
+import PasswordStrengthMeter, { MIN_PASSWORD_LENGTH } from '../../components/PasswordStrengthMeter';
 
 const T = {
   text: '#0f1419', sub: '#536471', field: '#eff3f4', brand: '#047857', danger: '#e11d48',
@@ -57,7 +58,7 @@ export default function ResetPassword() {
   const handleSubmit = async () => {
     setErrorMsg('');
     if (!password || !confirmPassword) return setErrorMsg('Please fill in both password fields.');
-    if (password.length < 6) return setErrorMsg('Your password must be at least 6 characters long.');
+    if (password.length < MIN_PASSWORD_LENGTH) return setErrorMsg(`Your password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
     if (password !== confirmPassword) return setErrorMsg('Passwords do not match.');
     if (!hasRecoverySession) return setErrorMsg('Your reset link has expired. Please request a new one.');
 
@@ -119,7 +120,7 @@ export default function ResetPassword() {
               <TextInput
                 value={password}
                 onChangeText={setPassword}
-                placeholder="At least 6 characters"
+                placeholder="At least 8 characters"
                 placeholderTextColor="#8b98a5"
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
@@ -134,6 +135,7 @@ export default function ResetPassword() {
                 {showPassword ? <EyeOff size={20} color={T.sub} /> : <Eye size={20} color={T.sub} />}
               </Pressable>
             </View>
+            <PasswordStrengthMeter password={password} />
 
             <Text style={[s.label, { marginTop: 18 }]}>Confirm new password</Text>
             <View style={s.inputWrap}>
@@ -157,7 +159,7 @@ export default function ResetPassword() {
               </Pressable>
             </View>
 
-            <Pressable onPress={handleSubmit} disabled={loading || !password || !confirmPassword} style={({ pressed }) => [s.button, (loading || !password || !confirmPassword) && s.disabled, pressed && !loading && s.pressed]}>
+            <Pressable onPress={handleSubmit} disabled={loading || password.length < MIN_PASSWORD_LENGTH || !confirmPassword} style={({ pressed }) => [s.button, (loading || password.length < MIN_PASSWORD_LENGTH || !confirmPassword) && s.disabled, pressed && !loading && s.pressed]}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.buttonText}>Update password</Text>}
             </Pressable>
           </>

@@ -773,7 +773,32 @@ export default function UserLayout() {
   const toastMeta = toastNotification ? getNotificationMeta(toastNotification.type) : null;
   const ToastIcon = toastMeta?.Icon;
   const toastTone = toastMeta ? TONES[toastMeta.tone] : null;
+  // Fit all five tab names on ONE line without truncation or manual breaks.
+  // The width reacts to narrow phones, rotation and split-screen resizing.
+  const { width: tabBarWidth } = useWindowDimensions();
+  const compactTabs = tabBarWidth < 390;
   const tabBarHeight = 56 + insets.bottom;
+  // Reserve space for the tab item's own horizontal layout. Longer labels
+  // scale down automatically instead of wrapping to two lines.
+  const singleLineFontSize = Math.max(6, Math.min(10, (tabBarWidth / 5 - 12) / 6.3));
+
+  const responsiveLabel = (label) => ({ color }) => (
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.45}
+      style={{
+        color,
+        fontSize: singleLineFontSize,
+        fontWeight: '600',
+        textAlign: 'center',
+        includeFontPadding: false,
+        width: '100%',
+      }}
+    >
+      {label}
+    </Text>
+  );
 
   const tabIcon = (Icon) => ({ color, focused }) => <Icon size={24} color={color} strokeWidth={focused ? 2.3 : 1.8} />;
 
@@ -796,15 +821,16 @@ export default function UserLayout() {
           ),
           tabBarActiveTintColor: isDark ? '#34d399' : T.brand,
           tabBarInactiveTintColor: isDark ? '#94a3b8' : T.sub,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+          tabBarLabelStyle: { fontSize: compactTabs ? singleLineFontSize : 11, fontWeight: '600' },
+          tabBarItemStyle: compactTabs ? { paddingHorizontal: 0, minWidth: 0 } : undefined,
           tabBarStyle: { backgroundColor: isDark ? '#162329' : '#fff', borderTopColor: isDark ? '#2b4249' : T.line, borderTopWidth: 1, elevation: 0 },
         }}
       >
-        <Tab.Screen name="Dashboard"   component={AnimatedDashboard} options={{ title: 'Browse',      tabBarIcon: tabIcon(Compass) }} />
-        <Tab.Screen name="Community"   component={AnimatedCommunity}     options={{ title: 'Community',   tabBarIcon: tabIcon(Globe) }} />
-        <Tab.Screen name="Sessions"    component={AnimatedSessions}      options={{ title: 'Sessions',    tabBarIcon: tabIcon(CalendarDays) }} />
-        <Tab.Screen name="Messages"    component={AnimatedMessages}      options={{ title: 'Messages',    tabBarIcon: tabIcon(MessageCircle) }} />
-        <Tab.Screen name="Leaderboard" component={AnimatedLeaderboard}   options={{ title: 'Leaderboard', tabBarIcon: tabIcon(Trophy) }} />
+        <Tab.Screen name="Dashboard"   component={AnimatedDashboard} options={{ title: 'Browse',      tabBarIcon: tabIcon(Compass), ...(compactTabs ? { tabBarLabel: responsiveLabel('Browse') } : {}) }} />
+        <Tab.Screen name="Community"   component={AnimatedCommunity}     options={{ title: 'Community',   tabBarIcon: tabIcon(Globe), ...(compactTabs ? { tabBarLabel: responsiveLabel('Community') } : {}) }} />
+        <Tab.Screen name="Sessions"    component={AnimatedSessions}      options={{ title: 'Sessions',    tabBarIcon: tabIcon(CalendarDays), ...(compactTabs ? { tabBarLabel: responsiveLabel('Sessions') } : {}) }} />
+        <Tab.Screen name="Messages"    component={AnimatedMessages}      options={{ title: 'Messages',    tabBarIcon: tabIcon(MessageCircle), ...(compactTabs ? { tabBarLabel: responsiveLabel('Messages') } : {}) }} />
+        <Tab.Screen name="Leaderboard" component={AnimatedLeaderboard}   options={{ title: 'Leaderboard', tabBarIcon: tabIcon(Trophy), ...(compactTabs ? { tabBarLabel: responsiveLabel('Leaderboard') } : {}) }} />
       </Tab.Navigator>
 
       {/* floating help: only on the Dashboard (Browse) tab */}
@@ -883,8 +909,7 @@ const s = StyleSheet.create({
   leftGroup: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
   brandLogoFrame: { width: 25, height: 25, flexShrink: 0, position: 'relative' },
   brandLogo: { width: 25, height: 25 },
-  // Mix a soft mint highlight over the *original* green/gold image in dark mode.
-  // Keep the untinted base image visible, so gold details are not replaced by a flat tint.
+  // Keep the original green-and-gold icon; the mint overlay brightens it in dark mode.
   brandLogoDarkHighlight: { position: 'absolute', top: 0, left: 0, tintColor: '#a7f3d0', opacity: 0.42 },
   rightGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   brand: { flexShrink: 1, fontSize: 17, fontWeight: '900', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', letterSpacing: -0.3 },
