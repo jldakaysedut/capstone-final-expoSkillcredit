@@ -313,8 +313,8 @@ export default function Sessions() {
           const actorIsInstructor = session.instructor_id === currentUserId;
           const otherId = actorIsInstructor ? session.student_id : session.instructor_id;
           const actor = actorIsInstructor
-            ? session.instructor?.full_name || 'Your teacher'
-            : session.student?.full_name || 'Your learner';
+            ? session.instructor?.full_name || 'Your provider'
+            : session.student?.full_name || 'Your seeker';
           const sessionLabel = session.skill?.title ? ` for "${session.skill.title}"` : '';
           let noticeContent;
 
@@ -348,7 +348,7 @@ export default function Sessions() {
           await supabase.from('notifications').insert([{
             user_id: session.instructor_id,
             type: 'session_cancelled',
-            content: `Your session was cancelled and the credits were refunded to the learner due to inactivity (Missed Schedule).`,
+            content: `Your session was cancelled and the credits were refunded to the seeker due to inactivity (Missed Schedule).`,
             link_url: `/sessions?session=${session.id}`,
           }]);
         }
@@ -369,7 +369,7 @@ export default function Sessions() {
 
         const isInstructorAction = session.instructor_id === currentUserId;
         const targetUserId = isInstructorAction ? session.student_id : session.instructor_id;
-        const actorName = isInstructorAction ? session.instructor?.full_name || 'The teacher' : session.student?.full_name || 'The learner';
+        const actorName = isInstructorAction ? session.instructor?.full_name || 'The provider' : session.student?.full_name || 'The seeker';
 
         try {
           const { error: noticeError } = await supabase.from('notifications').insert([{
@@ -392,7 +392,7 @@ export default function Sessions() {
         await supabase.from('notifications').insert([{
           user_id: session.student_id,
           type: 'session_started',
-          content: `${session.instructor?.full_name || 'The teacher'} has started the session. The countdown has begun!`,
+          content: `${session.instructor?.full_name || 'The provider'} has started the session. The countdown has begun!`,
           link_url: `/sessions?session=${session.id}`,
         }]);
       } else if (action === 'mark_done') {
@@ -409,7 +409,7 @@ export default function Sessions() {
 
         const isInstructor = session.instructor_id === currentUserId;
         const targetUserId = isInstructor ? session.student_id : session.instructor_id;
-        const actorName = isInstructor ? session.instructor?.full_name || 'The teacher' : session.student?.full_name || 'The learner';
+        const actorName = isInstructor ? session.instructor?.full_name || 'The provider' : session.student?.full_name || 'The seeker';
 
         if (outcome.state === 'completed' && outcome.awarded === true) {
           DeviceEventEmitter.emit('credit_updated');
@@ -418,13 +418,13 @@ export default function Sessions() {
             {
               user_id: session.student_id,
               type: 'session_completed',
-              content: `Your session with ${session.instructor?.full_name || 'the teacher'} is officially completed!`,
+              content: `Your session with ${session.instructor?.full_name || 'the provider'} is officially completed!`,
               link_url: `/sessions?session=${session.id}`,
             },
             {
               user_id: session.instructor_id,
               type: 'session_completed',
-              content: `Your session with ${session.student?.full_name || 'the learner'} is officially completed! ${session.credit_amount} CR added.`,
+              content: `Your session with ${session.student?.full_name || 'the seeker'} is officially completed! ${session.credit_amount} CR added.`,
               link_url: `/sessions?session=${session.id}`,
             },
           ]);
@@ -445,8 +445,8 @@ export default function Sessions() {
         if (!undoError) {
           const otherId = isInstructor ? session.student_id : session.instructor_id;
           const actor = isInstructor
-            ? session.instructor?.full_name || 'The teacher'
-            : session.student?.full_name || 'The learner';
+            ? session.instructor?.full_name || 'The provider'
+            : session.student?.full_name || 'The seeker';
           if (otherId && otherId !== currentUserId) {
             const { error: noticeError } = await supabase.from('notifications').insert({
               user_id: otherId,
@@ -478,11 +478,11 @@ export default function Sessions() {
       await supabase.from('notifications').insert([{
         user_id: sess.student_id,
         type: 'session_disputed',
-        content: `Your Teacher proposed a new time for your session: ${newDate} at ${newTime}. Please Accept or Decline.`,
+        content: `Your Provider proposed a new time for your session: ${newDate} at ${newTime}. Please Accept or Decline.`,
         link_url: `/sessions?session=${sess.id}`,
       }]);
 
-      Alert.alert('Done', 'New time proposed to the learner successfully!');
+      Alert.alert('Done', 'New time proposed to the seeker successfully!');
       setProposeModal({ isOpen: false, session: null });
       fetchSessions(currentUserId);
     } catch (error) {
@@ -505,7 +505,7 @@ export default function Sessions() {
       await supabase.from('notifications').insert([{
         user_id: sess.instructor_id,
         type: 'new_rating',
-        content: `${sess.student?.full_name || 'A learner'} evaluated your session and left a rating!`,
+        content: `${sess.student?.full_name || 'A seeker'} evaluated your session and left a rating!`,
         link_url: `/sessions?session=${sess.id}`,
       }]);
 
@@ -532,7 +532,7 @@ export default function Sessions() {
 
       const isInstructorAction = sess.instructor_id === currentUserId;
       const targetUserId = isInstructorAction ? sess.student_id : sess.instructor_id;
-      const actorName = isInstructorAction ? sess.instructor?.full_name || 'The teacher' : sess.student?.full_name || 'The learner';
+      const actorName = isInstructorAction ? sess.instructor?.full_name || 'The provider' : sess.student?.full_name || 'The seeker';
 
       await supabase.from('notifications').insert([{
         user_id: targetUserId,
@@ -591,7 +591,7 @@ export default function Sessions() {
         if (!isExpired) add('Propose new time', openPropose, 'soft');
         add(isExpired ? 'Return credit' : 'Decline',
           () => askThenRun(isExpired ? 'Return credit' : 'Decline',
-            isExpired ? 'Expired booking. Return the credits to the learner?' : 'Decline?',
+            isExpired ? 'Expired booking. Return the credits to the seeker?' : 'Decline?',
             session, 'decline', isExpired ? 'Return credit' : 'Decline'), 'danger');
       } else if (!isExpired) {
         add('Cancel & refund', () => askThenRun('Cancel', 'Cancel?', session, 'cancel', 'Cancel booking'), 'danger');
@@ -600,12 +600,12 @@ export default function Sessions() {
       }
     } else if (st === 'reschedule_proposed') {
       if (isInstructor) {
-        hint = isExpired ? '⏰ Proposed schedule expired' : '⏳ Waiting for the learner to confirm the new time';
+        hint = isExpired ? '⏰ Proposed schedule expired' : '⏳ Waiting for the seeker to confirm the new time';
         if (!isExpired) add('Edit proposed time', openPropose, 'purple');
         add(isExpired ? 'Return credit' : 'Decline',
-          () => askThenRun(isExpired ? 'Return credit' : 'Decline', 'Cancel booking and return learner credits?', session, 'decline', isExpired ? 'Return credit' : 'Decline'), 'danger');
+          () => askThenRun(isExpired ? 'Return credit' : 'Decline', 'Cancel booking and return seeker credits?', session, 'decline', isExpired ? 'Return credit' : 'Decline'), 'danger');
       } else {
-        hint = isExpired ? '⏰ Proposed schedule expired' : '📅 The teacher proposed a new schedule';
+        hint = isExpired ? '⏰ Proposed schedule expired' : '📅 The provider proposed a new schedule';
         if (!isExpired) add('Accept schedule', () => handleUpdateStatus(session, 'accept_schedule'), 'indigo');
         add(isExpired ? 'Claim refund' : 'Cancel & refund',
           () => askThenRun(isExpired ? 'Claim refund' : 'Cancel', 'Cancel and refund this booking?', session, 'cancel', isExpired ? 'Claim refund' : 'Cancel session', false), isExpired ? 'greenSoft' : 'danger');
@@ -615,13 +615,13 @@ export default function Sessions() {
         if (!isNoShow) {
           hint = '📅 Schedule confirmed. Wait for the day.';
           add('Start session', () => askThenRun('Start session', 'Start session now? This will begin the duration countdown.', session, 'start_session', 'Start', false), 'green', PlayCircle);
-          add('Cancel booking', () => askThenRun('Emergency cancel', 'Emergency: Cancel this upcoming session? Credits will be refunded to the learner.', session, 'cancel', 'Cancel booking'), 'danger');
+          add('Cancel booking', () => askThenRun('Emergency cancel', 'Emergency: Cancel this upcoming session? Credits will be refunded to the seeker.', session, 'cancel', 'Cancel booking'), 'danger');
         } else tag = '⏰ Missed schedule';
       } else if (!isNoShow) {
         hint = '📅 Schedule confirmed. Wait for the day.';
         add('Cancel & refund', () => askThenRun('Cancel', 'Cancel booking?', session, 'cancel', 'Cancel booking'), 'danger');
       } else {
-        add('Claim refund (no-show)', () => askThenRun('No-show', 'Teacher is a no-show. Claim your refund now?', session, 'cancel_no_show', 'Claim refund', false), 'dangerSolid', RefreshCw);
+        add('Claim refund (no-show)', () => askThenRun('No-show', 'Provider is a no-show. Claim your refund now?', session, 'cancel_no_show', 'Claim refund', false), 'dangerSolid', RefreshCw);
       }
     } else {
       // active, completed, disputed, cancelled
@@ -784,7 +784,7 @@ export default function Sessions() {
                               <Text style={[s.chip, { backgroundColor: meta.chipBg, color: meta.chipText }]}>{meta.label}</Text>
                             </View>
                             <Text style={{ fontSize: 13, color: T.sub, marginTop: 1 }} numberOfLines={1}>
-                              {isInstructor ? 'Learner' : 'Teacher'} · {session.skill?.title || 'Unknown skill'}
+                              {isInstructor ? 'Seeker' : 'Provider'} · {session.skill?.title || 'Unknown skill'}
                             </Text>
                             <Text style={{ fontSize: 13, color: T.text, marginTop: 3 }}>
                               {time} · <Text style={{ fontWeight: '700', color: T.brand }}>{session.credit_amount} CR</Text>
@@ -996,7 +996,7 @@ export default function Sessions() {
             <View style={s.grabber} />
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={{ alignItems: 'center', marginVertical: 14 }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: T.text, letterSpacing: -0.2 }}>Teacher evaluation</Text>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: T.text, letterSpacing: -0.2 }}>Provider evaluation</Text>
                 <Text style={{ fontSize: 13, color: T.sub, marginTop: 4, textAlign: 'center' }}>
                   Rate <Text style={{ fontWeight: '700', color: T.text }}>{ratingModal.session?.instructor?.full_name}</Text>.
                 </Text>
